@@ -1,0 +1,23 @@
+# Copy this file to terraform.tfvars and fill in your values.
+#
+# project_id: Your GCP project ID.
+# region: GCP region with NVIDIA L4 GPU support (e.g., us-central1).
+# service_account_email: SA used to run AlphaEvolve experiments.
+# hf_token: HuggingFace token for Gemma 4 access (if model is gated).
+# engine_id: Discovery Engine engine ID (created automatically).
+# assistant_id: Discovery Engine assistant ID (must be "default_assistant").
+
+project_id            = "your-gcp-project-id"
+region                = "us-central1"
+service_account_email = "your-sa@your-gcp-project-id.iam.gserviceaccount.com"
+hf_token              = ""
+repository_id         = "alphaevolve"
+engine_id             = "alpha-evolve-experiment-engine"
+assistant_id          = "default_assistant"
+
+# GKE
+gke_cluster_name = "alphaevolve-llm-cluster"
+max_gpu_nodes    = 4
+
+# Monitoring (set enable_monitoring = true to deploy Prometheus + Grafana)
+# enable_monitoring = true

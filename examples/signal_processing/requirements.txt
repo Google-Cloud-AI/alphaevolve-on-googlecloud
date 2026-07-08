@@ -1,0 +1,5 @@
+# Signal Processing example — extra dependencies beyond core alpha_evolve
+scipy>=1.11.0
+scikit-learn>=1.3.0
+pykalman>=0.9.7
+PyWavelets>=1.5.0

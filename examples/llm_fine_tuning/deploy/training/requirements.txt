@@ -1,0 +1,10 @@
+transformers==5.5.0
+peft>=0.13.0
+trl>=1.0.0
+datasets>=3.0.0
+bitsandbytes>=0.44.0
+accelerate>=1.0.0
+sentencepiece>=0.2.0
+protobuf>=4.25.0
+google-cloud-storage>=2.14.0
+ray[default,train]>=2.54.0

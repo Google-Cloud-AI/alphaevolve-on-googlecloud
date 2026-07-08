@@ -1,0 +1,28 @@
+# How to Contribute
+
+We are currently not accepting external contributions. For technical issues,
+release-specific questions, or to provide feedback, please contact your assigned
+Google Cloud account team.
+
+The following is provided for reference, should this policy change in the future.
+
+## Before you begin
+
+### Sign our Contributor License Agreement
+
+Contributions to this project must be accompanied by a
+[Contributor License Agreement](https://cla.developers.google.com/about) (CLA).
+You (or your employer) retain the copyright to your contribution; this simply
+gives us permission to use and redistribute your contributions as part of the
+project.
+
+If you or your current employer have already signed the Google CLA (even if it
+was for a different project), you probably don't need to do it again.
+
+Visit <https://cla.developers.google.com/> to see your current agreements or to
+sign a new one.
+
+### Review our Community Guidelines
+
+This project follows
+[Google's Open Source Community Guidelines](https://opensource.google/conduct/).

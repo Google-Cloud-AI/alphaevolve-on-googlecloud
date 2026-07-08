@@ -1,0 +1,6 @@
+flask>=3.0.0
+gunicorn>=22.0.0
+kubernetes>=29.0.0
+google-cloud-storage>=2.14.0
+prometheus_client
+pyyaml>=6.0
