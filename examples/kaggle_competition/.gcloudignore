@@ -1,0 +1,9 @@
+data/
+evolved_program/
+report/
+terraform/
+.terraform/
+*.tfstate*
+__pycache__/
+*.pyc
+.env

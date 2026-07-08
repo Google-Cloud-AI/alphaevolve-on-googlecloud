@@ -1,0 +1,155 @@
+# Copyright 2026 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Cloud Build pipeline for GKE-based LLM fine-tuning evaluator.
+#
+# Prerequisites: run `terraform apply` first to create GKE cluster,
+# namespace, RayCluster, and monitoring (if enabled).
+#
+# This pipeline:
+#   1. Downloads model and dataset to GCS (skips if cached)
+#   2. Builds training image (CUDA + PyTorch) for RayCluster workers
+#   3. Builds gateway image (lightweight Flask)
+#   4. Deploys the gateway service to GKE
+
+steps:
+  # Step 1: Download model and dataset to GCS bucket
+  - name: 'python:3.11-slim'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        pip install --quiet transformers datasets huggingface_hub google-cloud-storage &&
+        python3 -c "
+        import os
+        os.environ['HF_TOKEN'] = '${_HF_TOKEN}'
+
+        import glob
+        from huggingface_hub import snapshot_download
+        from datasets import load_dataset
+        from google.cloud import storage
+
+        bucket_name = '${_ARTIFACTS_BUCKET}'
+        client = storage.Client()
+        bucket = client.bucket(bucket_name)
+
+        # Check if model already exists in bucket
+        blobs = list(bucket.list_blobs(prefix='model/', max_results=1))
+        if blobs:
+            print(f'Model already cached in gs://{bucket_name}/model/')
+        else:
+            print('Downloading model to local cache...')
+            model_path = snapshot_download('google/gemma-4-E2B-it', token=os.environ.get('HF_TOKEN') or None)
+            print(f'Uploading model to gs://{bucket_name}/model/...')
+            import pathlib
+            for filepath in glob.glob(f'{model_path}/**', recursive=True):
+                if os.path.isfile(filepath):
+                    rel = os.path.relpath(filepath, model_path)
+                    blob = bucket.blob(f'model/{rel}')
+                    blob.upload_from_filename(filepath)
+            print('Model uploaded.')
+
+        # Check if dataset already exists
+        blobs = list(bucket.list_blobs(prefix='dataset/', max_results=1))
+        if blobs:
+            print(f'Dataset already cached in gs://{bucket_name}/dataset/')
+        else:
+            print('Downloading and subsampling dataset...')
+            ds = load_dataset('NousResearch/hermes-function-calling-v1', 'func_calling_singleturn', split='train')
+            num_samples = int('${_DATASET_SAMPLES}')
+            if num_samples > 0 and len(ds) > num_samples:
+                total = len(ds)
+                ds = ds.shuffle(seed=42).select(range(num_samples))
+                print(f'Subsampled to {num_samples} examples (from {total})')
+            local_path = '/tmp/dataset'
+            ds.save_to_disk(local_path)
+            print(f'Uploading dataset to gs://{bucket_name}/dataset/...')
+            for filepath in glob.glob(f'{local_path}/**', recursive=True):
+                if os.path.isfile(filepath):
+                    rel = os.path.relpath(filepath, local_path)
+                    blob = bucket.blob(f'dataset/{rel}')
+                    blob.upload_from_filename(filepath)
+            print('Dataset uploaded.')
+        "
+
+  # Step 2: Build training image (CUDA + PyTorch, for GPU Jobs)
+  - name: 'gcr.io/cloud-builders/docker'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        if gcloud artifacts docker images describe \
+          ${_AR_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/alphaevolve-llm-training:${_TAG} \
+          --project=${PROJECT_ID} > /dev/null 2>&1; then
+          echo "Training image already exists, skipping build."
+        else
+          docker build -t ${_AR_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/alphaevolve-llm-training:${_TAG} deploy/training/
+          docker push ${_AR_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/alphaevolve-llm-training:${_TAG}
+        fi
+
+  # Step 3: Build gateway image (lightweight Flask, no GPU)
+  - name: 'gcr.io/cloud-builders/docker'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        docker build -t ${_AR_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/alphaevolve-llm-gateway:${_TAG} deploy/gateway/
+        docker push ${_AR_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/alphaevolve-llm-gateway:${_TAG}
+
+  # Step 4: Get GKE credentials and deploy gateway
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        gcloud container clusters get-credentials ${_GKE_CLUSTER} \
+          --region ${_GKE_REGION} --project ${PROJECT_ID}
+
+        # Apply the gateway manifest
+        kubectl apply -f deploy/gateway.yaml
+
+        # Set the gateway container image
+        kubectl set image deployment/gateway \
+          gateway=${_AR_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/alphaevolve-llm-gateway:${_TAG} \
+          -n alphaevolve
+
+        # Set environment variables for the gateway
+        kubectl set env deployment/gateway -n alphaevolve \
+          ARTIFACTS_BUCKET=${_ARTIFACTS_BUCKET} \
+          NAMESPACE=alphaevolve \
+          ARTIFACTS_PATH=/mnt/artifacts \
+          RAY_CLUSTER_NAME=alphaevolve-ray-cluster \
+          JOB_TIMEOUT_SECONDS=2400 \
+          JOB_POLL_INTERVAL=10
+
+        echo "Waiting for gateway deployment to be ready..."
+        kubectl rollout status deployment/gateway -n alphaevolve --timeout=120s
+
+        echo ""
+        echo "=== Gateway Ready ==="
+        echo "Use 'kubectl port-forward svc/gateway -n alphaevolve 8080:80' to access"
+        echo "Then set EVALUATOR_URL=http://localhost:8080/evaluate in your .env"
+
+substitutions:
+  _AR_REGION: us-central1
+  _GKE_REGION: us-central1
+  _GKE_CLUSTER: alphaevolve-llm-cluster
+  _REPO: alphaevolve
+  _TAG: latest
+  _HF_TOKEN: ''
+  _ARTIFACTS_BUCKET: ''
+  _DATASET_SAMPLES: '2500'
+
+options:
+  logging: CLOUD_LOGGING_ONLY

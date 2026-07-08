@@ -1,0 +1,14 @@
+# Copy this file to terraform.tfvars and fill in your values.
+#
+# project_id: Your GCP project ID.
+# region: GCP region for Cloud Run and Artifact Registry.
+# service_account_email: SA used to run AlphaEvolve experiments.
+# engine_id: Discovery Engine engine ID (created automatically).
+# assistant_id: Discovery Engine assistant ID (must be "default_assistant").
+
+project_id            = "your-gcp-project-id"
+region                = "us-central1"
+service_account_email = "your-sa@your-gcp-project-id.iam.gserviceaccount.com"
+repository_id         = "alphaevolve"
+engine_id             = "alpha-evolve-experiment-engine"
+assistant_id          = "default_assistant"

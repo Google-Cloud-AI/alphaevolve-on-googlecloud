@@ -1,0 +1,86 @@
+# Copyright 2026 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gateway
+  namespace: alphaevolve
+  labels:
+    app: alphaevolve-gateway
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: alphaevolve-gateway
+  template:
+    metadata:
+      labels:
+        app: alphaevolve-gateway
+    spec:
+      serviceAccountName: alphaevolve-gateway
+      containers:
+        - name: gateway
+          image: GATEWAY_IMAGE # Replaced by cloudbuild or kustomize
+          ports:
+            - containerPort: 8080
+          env:
+            - name: ARTIFACTS_BUCKET
+              value: "" # Set to your GCS bucket name
+            - name: NAMESPACE
+              value: "alphaevolve"
+            - name: ARTIFACTS_PATH
+              value: "/mnt/artifacts"
+            - name: RAY_CLUSTER_NAME
+              value: "alphaevolve-ray-cluster"
+            - name: JOB_TIMEOUT_SECONDS
+              value: "2400"
+            - name: JOB_POLL_INTERVAL
+              value: "10"
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "512Mi"
+            limits:
+              cpu: "1"
+              memory: "1Gi"
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 30
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gateway
+  namespace: alphaevolve
+  labels:
+    app: alphaevolve-gateway
+spec:
+  type: ClusterIP
+  selector:
+    app: alphaevolve-gateway
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080
+      protocol: TCP

@@ -1,0 +1,33 @@
+.env*
+.logs
+*.swp
+.coverage
+
+venv/
+.venv/
+data/
+releases/
+
+# Python
+*.pyc
+__pycache__/
+*.egg-info
+.ruff_cache/
+
+# Skill evals (local only)
+skill_evals/
+
+# Local demo notebooks
+alphaevolve_demo_*.ipynb
+
+# Generated experiment outputs
+**/evolved_program/
+**/report/
+**/results/
+examples/_template/
+
+# Terraform
+**/.terraform/
+**/terraform.tfstate*
+**/terraform.tfvars
+**/.terraform.lock.hcl
