@@ -58,6 +58,9 @@ cloud infrastructure beyond the AlphaEvolve API. It's the fastest way to see the
 git clone https://github.com/Google-Cloud-AI/alphaevolve-on-googlecloud.git
 cd alphaevolve-on-googlecloud
 
+# Create a virtual env
+uv venv
+
 # Install the alpha_evolve package (from src/) with uv
 uv pip install -e ".[examples]"
 
