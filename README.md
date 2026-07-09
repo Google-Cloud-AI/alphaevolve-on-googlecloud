@@ -29,6 +29,7 @@ environments — from a pure-Python loop with zero infrastructure to GPU trainin
 - [Results](#results)
 - [How AlphaEvolve works](#how-alphaevolve-works)
 - [Examples](#examples)
+- [HPC Batch with Cluster Toolkit](#hpc-batch-ctk)
 - [Using the `alpha_evolve` library](#using-the-alpha_evolve-library)
 - [Configuration](#configuration)
 - [Repository structure](#repository-structure)
@@ -168,6 +169,14 @@ infrastructure to production GPU training.
 
 ---
 
+## HPC Batch CTK
+
+The previous examples illustrate that algorithm discovery and optimization problems differ in the type and cost of the evaluators. For example, some evaluators can be run in the same python environment as the controller, others require compilation and/or offloading to worker machines. This last example ([`hpc-batch-ctk`](hpc-batch-ctk)) illustrates how you can offload evaluator execution to [Google Cloud Batch](https://cloud.google.com/batch) and use customized containers and code compilation of the solutions as required. This enables you to set up optimizations that require a complex software stack (e.g. running an ISV/OSS application or optimizing parts of a scientific computing software package in situ). Using Batch gives you control over the required GCP instance type to be used, as well as the type of accelerator to be requested. This example uses a [Pub/Sub](https://cloud.google.com/pubsub) message queue for the communication between the controller and evaluators, a [GCS bucket](https://cloud.google.com/storage) for storing the results, and sets up a simple Colab Enterprise Notebook to facilitate access to the results.
+
+We use Google’s [Cluster Toolkit](https://docs.cloud.google.com/cluster-toolkit/docs/overview) to configure and deploy all required infrastructure.
+
+---
+
 ## Using the `alpha_evolve` library
 
 The public API is small. A minimal experiment looks like this (see any example's
@@ -260,6 +269,7 @@ examples/
   adaptive_sort/      evolve Rust, Cloud Run evaluator
   adaptive_sort_cpp/  evolve C++, Cloud Run evaluator
   llm_fine_tuning/    LoRA HPO on GKE + Ray (Terraform)
+hpc-batch-ctk/        HPC Batch + CTK
 tests/                Unit tests for the library
 bin/                  Release tooling
 ```

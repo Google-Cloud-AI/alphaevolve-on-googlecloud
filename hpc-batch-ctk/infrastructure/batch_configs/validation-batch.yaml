@@ -1,0 +1,290 @@
+# Copyright 2026 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+taskGroups:
+- taskSpec:
+    runnables:
+    - container:
+        imageUri: python:3.12-slim-bookworm
+        commands:
+        - sh
+        - -c
+        - |
+          pip install --no-cache-dir --require-hashes -r ${_MOUNT_PATH}/config/requirements.txt
+          python3 - <<'EOF'
+          import json
+          import os
+          import sys
+          import google.auth
+          from google.cloud import pubsub_v1
+          from google.cloud import storage
+          import requests
+
+          def log_msg(severity, message):
+              print(json.dumps({"severity": severity, "message": message}))
+
+          def check_env_vars():
+              log_msg("INFO", "Checking environment variables...")
+              required_vars = [
+                  "_PROJECT_ID",
+                  "_CLOUD_BUCKET_NAME",
+                  "_PUBSUB_SUBSCRIPTION",
+                  "_USER_EXPERIMENT_NAME",
+                  "_BASE_URL",
+                  "_LOCATION",
+                  "_COLLECTION",
+                  "_REGION",
+                  "_REPO_NAME",
+                  "_CONTROLLER_IMAGE_URI",
+                  "_EVALUATOR_IMAGE_URI",
+                  "_ENGINE",
+                  "_ASSISTANT",
+                  "_REGION_CODE",
+              ]
+              all_set = True
+              for var in required_vars:
+                  val = os.getenv(var)
+                  if not val or not val.strip():
+                      log_msg("ERROR", f"Environment variable {var} is NOT set or is empty.")
+                      all_set = False
+                  else:
+                      log_msg("INFO", f"Environment variable {var} is set to: {val}")
+              return all_set
+
+          def check_auth():
+              log_msg("INFO", "Checking Google Cloud Auth...")
+              try:
+                  credentials, project = google.auth.default()
+                  log_msg("INFO", f"Authentication successful. Default project: {project}")
+                  return credentials, project
+              except Exception as e:
+                  log_msg("ERROR", f"Authentication failed: {e}")
+                  return None, None
+
+          def check_artifact_registry_image_uri(credentials, image_uri, description):
+              log_msg("INFO", f"Checking for {description} image ({image_uri}) via Docker V2 API...")
+              try:
+                  if not credentials.token:
+                      from google.auth.transport.requests import Request
+                      credentials.refresh(Request())
+                  
+                  parts = image_uri.split('/')
+                  if len(parts) < 2:
+                      log_msg("ERROR", f"Invalid image URI format: {image_uri}")
+                      return False
+                      
+                  host = parts[0]
+                  image_path_tag = "/".join(parts[1:])
+                  if ':' in image_path_tag:
+                      image_name, tag = image_path_tag.split(':')
+                  else:
+                      image_name = image_path_tag
+                      tag = "latest"
+                  
+                  url = f"https://{host}/v2/{image_name}/manifests/{tag}"
+                  headers = {
+                      "Authorization": f"Bearer {credentials.token}",
+                      "Accept": "application/vnd.docker.distribution.manifest.v2+json, application/vnd.oci.image.manifest.v1+json"
+                  }
+                  log_msg("INFO", f"Sending GET request to {url}")
+                  resp = requests.get(url, headers=headers)
+                  log_msg("INFO", f"Received response status code: {resp.status_code}")
+                  if resp.status_code == 200:
+                      log_msg("INFO", f"{description} image manifest found successfully.")
+                      return True
+                  elif resp.status_code in [404, 403, 401]:
+                      log_msg("ERROR", f"{description} image manifest not found at {url} or permission denied. Please build and push it first.")
+                      log_msg("ERROR", f"Response: {resp.text}")
+                      return False
+                  else:
+                      log_msg("WARNING", f"Unexpected status code checking image: {resp.status_code}")
+                      log_msg("WARNING", f"Response: {resp.text}")
+                      return True
+              except Exception as e:
+                  log_msg("ERROR", f"{description} image check failed: {e}")
+                  return False
+                  return False
+
+          def check_gcs(credentials, bucket_name):
+              user_experiment_name = os.getenv("_USER_EXPERIMENT_NAME")
+              blob_name = f"{user_experiment_name}/current_experiment.json"
+              log_msg("INFO", f"Mimicking controller bootstrap: Writing test experiment file to gs://{bucket_name}/{blob_name}...")
+              try:
+                  client = storage.Client(credentials=credentials)
+                  bucket = client.bucket(bucket_name)
+                  blob = bucket.blob(blob_name)
+                  fake_experiment = {
+                      "session_name": "validation-session",
+                      "experiment_name": "validation-experiment",
+                      "initial_program": {
+                          "content": {"files": [{"path": "main.py", "content": "# test"}]}
+                      },
+                  }
+                  blob.upload_from_string(json.dumps(fake_experiment), content_type="application/json")
+                  log_msg("INFO", "Successfully wrote test experiment file (objects.create OK)")
+                  content = blob.download_as_text()
+                  data = json.loads(content)
+                  if data.get("session_name") == "validation-session":
+                      log_msg("INFO", "Successfully retrieved test experiment file (object.get OK)")
+                  else:
+                      log_msg("ERROR", "Couldn't retrieve test experiment file")
+                      return False
+                  blob.delete()
+                  log_msg("INFO", "Successfully deleted test experiment file")
+                  return True
+              except Exception as e:
+                  log_msg("ERROR", f"GCS check failed for {blob_name}: {e}")
+                  return False
+
+          def check_pubsub(credentials, project_id, subscription_name):
+              log_msg("INFO", f"Checking Pub/Sub subscription access: {subscription_name}...")
+              try:
+                  subscriber = pubsub_v1.SubscriberClient(credentials=credentials)
+                  subscription_path = subscriber.subscription_path(project_id, subscription_name)
+                  subscriber.get_subscription(request={"subscription": subscription_path})
+                  log_msg("INFO", f"Successfully accessed subscription {subscription_name}")
+                  return True
+              except Exception as e:
+                  log_msg("ERROR", f"Pub/Sub check failed: {e}")
+                  return False
+
+          def check_alpha_evolve_api(credentials, project_id):
+              log_msg("INFO", "Checking AlphaEvolve API (Discovery Engine) connectivity...")
+              try:
+                  if not credentials.token:
+                      from google.auth.transport.requests import Request
+                      credentials.refresh(Request())
+                  base_url = os.getenv("_BASE_URL")
+                  location = os.getenv("_LOCATION")
+                  collection = os.getenv("_COLLECTION")
+                  engine = os.getenv("_ENGINE")
+                  assistant = os.getenv("_ASSISTANT")
+                  url = f"https://{base_url}/v1alpha/projects/{project_id}/locations/{location}/collections/{collection}/engines/{engine}/assistants/{assistant}:streamAssist"
+                  headers = {"Content-Type": "application/json", "Authorization": f"Bearer {credentials.token}"}
+                  data = {"query": {"text": "starting alpha evolve query"}, "assistSkippingMode": "REQUEST_ASSIST"}
+                  log_msg("INFO", f"Sending POST request to {url}")
+                  resp = requests.post(url, headers=headers, data=json.dumps(data))
+                  log_msg("INFO", f"Received response status code: {resp.status_code}")
+                  if resp.status_code == 200:
+                      log_msg("INFO", "AlphaEvolve API session creation mock successful.")
+                      return True
+                  elif resp.status_code == 403 or resp.status_code == 404:
+                      log_msg("ERROR", "AlphaEvolve API returned 403 Forbidden or 404 Not Found. Permission issue or project not allowlisted for early access.")
+                      return False
+                  else:
+                      log_msg("ERROR", f"AlphaEvolve API check failed with status code: {resp.status_code}")
+                      if resp.text:
+                          log_msg("ERROR", f"Response: {resp.text}")
+                      return False
+              except Exception as e:
+                  log_msg("ERROR", f"AlphaEvolve API check failed: {e}")
+                  return False
+
+          def print_summary(controller_image_ok, evaluator_image_ok, gcs_ok, pubsub_ok, api_ok):
+              summary_lines = []
+              summary_lines.append("=== Validation Summary ===")
+              summary_lines.append(f"{'Component':<20} | {'Status':<10} | {'Suggested Remediation':<50}")
+              summary_lines.append("-" * 85)
+              def add_row(component, status, remediation):
+                  summary_lines.append(f"{component:<20} | {status:<10} | {remediation:<50}")
+              if controller_image_ok:
+                  add_row("Controller Image", "PASSED", "-")
+              else:
+                  add_row("Controller Image", "FAILED", "Build and push the controller image.")
+              if evaluator_image_ok:
+                  add_row("Evaluator Image", "PASSED", "-")
+              else:
+                  add_row("Evaluator Image", "FAILED", "Build and push the evaluator image.")
+              if gcs_ok:
+                  add_row("GCS", "PASSED", "-")
+              else:
+                  add_row("GCS", "FAILED", "Check object permissions on GCS bucket.")
+              if pubsub_ok:
+                  add_row("Pub/Sub", "PASSED", "-")
+              else:
+                  add_row("Pub/Sub", "FAILED", "Check permissions on Pub/Sub subscription.")
+              if api_ok:
+                  add_row("AlphaEvolve API", "PASSED", "-")
+              else:
+                  add_row("AlphaEvolve API", "FAILED", "Check permission or ensure project is allowlisted in EAP.")
+              
+              if not (controller_image_ok and evaluator_image_ok and gcs_ok and pubsub_ok and api_ok):
+                  summary_lines.append("\n[ERROR] Some validation checks failed. See details above or in full logs.")
+              
+              summary_lines.append("=== End Validation Summary ===")
+              
+              log_msg("INFO", "\n".join(summary_lines))
+
+          def main():
+              log_msg("INFO", "=== Starting Environment Validation ===")
+              if not check_env_vars():
+                  log_msg("ERROR", "Environment variable checks failed.")
+                  sys.exit(1)
+              credentials, project = check_auth()
+              if not credentials:
+                  log_msg("ERROR", "Auth check failed.")
+                  sys.exit(1)
+              project_id = os.getenv("_PROJECT_ID")
+              bucket_name = os.getenv("_CLOUD_BUCKET_NAME")
+              subscription_name = os.getenv("_PUBSUB_SUBSCRIPTION")
+              controller_uri = os.getenv("_CONTROLLER_IMAGE_URI")
+              evaluator_uri = os.getenv("_EVALUATOR_IMAGE_URI")
+              controller_image_ok = check_artifact_registry_image_uri(credentials, controller_uri, "Controller")
+              evaluator_image_ok = check_artifact_registry_image_uri(credentials, evaluator_uri, "Evaluator")
+              gcs_ok = check_gcs(credentials, bucket_name)
+              pubsub_ok = check_pubsub(credentials, project_id, subscription_name)
+              api_ok = check_alpha_evolve_api(credentials, project_id)
+              print_summary(controller_image_ok, evaluator_image_ok, gcs_ok, pubsub_ok, api_ok)
+              if controller_image_ok and evaluator_image_ok and gcs_ok and pubsub_ok and api_ok:
+                  sys.exit(0)
+              else:
+                  sys.exit(1)
+
+          if __name__ == "__main__":
+              main()
+          EOF
+        volumes:
+        - "${_MOUNT_PATH}:${_MOUNT_PATH}"
+      environment:
+        variables:
+          _PROJECT_ID: "${_PROJECT_ID}"
+          _CLOUD_BUCKET_NAME: "${_CLOUD_BUCKET_NAME}"
+          _PUBSUB_SUBSCRIPTION: "${_PUBSUB_SUBSCRIPTION}"
+          _USER_EXPERIMENT_NAME: "${_USER_EXPERIMENT_NAME}"
+          _BASE_URL: "${_BASE_URL}"
+          _LOCATION: "${_LOCATION}"
+          _COLLECTION: "${_COLLECTION}"
+          _REGION: "${_REGION}"
+          _REPO_NAME: "${_REPO_NAME}"
+          _CONTROLLER_IMAGE_URI: "${_CONTROLLER_IMAGE_URI}"
+          _EVALUATOR_IMAGE_URI: "${_EVALUATOR_IMAGE_URI}"
+          _MOUNT_PATH: "${_MOUNT_PATH}"
+          _ENGINE: "${_ENGINE}"
+          _ASSISTANT: "${_ASSISTANT}"
+          _REGION_CODE: "${_REGION_CODE}"
+    volumes:
+    - gcs:
+        remotePath: "${_CLOUD_BUCKET_NAME}"
+      mountPath: "${_MOUNT_PATH}"
+  taskCount: 1
+  parallelism: 1
+allocationPolicy:
+  instances:
+  - policy:
+      machineType: n2-standard-4
+      provisioningModel: STANDARD
+  serviceAccount:
+    email: ${_SERVICE_ACCOUNT_EMAIL}
+logsPolicy:
+  destination: CLOUD_LOGGING

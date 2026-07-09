@@ -1,0 +1,70 @@
+# Copyright 2026 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+taskGroups:
+- taskSpec:
+    runnables:
+    - container:
+        imageUri: "${_CONTROLLER_IMAGE_URI}"
+        volumes:
+        - "${_MOUNT_PATH}:${_MOUNT_PATH}"
+      environment:
+        variables:
+          _DEPLOYMENT_NAME: "${_DEPLOYMENT_NAME}"
+          _REGION_CODE: "${_REGION_CODE}"
+          _ASSISTANT: "${_ASSISTANT}"
+          _BASE_URL: "${_BASE_URL}"
+          _COLLECTION: "${_COLLECTION}"
+          _CONCURRENCY: "${_CONCURRENCY}"
+          _ENGINE: "${_ENGINE}"
+          _LOCATION: "${_LOCATION}"
+          _MAX_PROGRAMS_EVALUATED: "${_MAX_PROGRAMS_EVALUATED}"
+          _MAX_PROGRAMS_GENERATED: "${_MAX_PROGRAMS_GENERATED}"
+          _MAX_DURATION: "${_MAX_DURATION}"
+          _IDLE_TIMEOUT: "${_IDLE_TIMEOUT}"
+          _NUM_SAMPLERS: "${_NUM_SAMPLERS}"
+          _POLL_INTERVAL: "${_POLL_INTERVAL}"
+          _MODEL: "${_MODEL}"
+          _PROJECT_ID: "${_PROJECT_ID}"
+          _PUBSUB_TOPIC: "${_PUBSUB_TOPIC}"
+          _PUBSUB_SUBSCRIPTION: "${_PUBSUB_SUBSCRIPTION}"
+          _CLOUD_BUCKET_NAME: "${_CLOUD_BUCKET_NAME}"
+          _REGION: "${_REGION}"
+          _PROGRAMS_DIR: "${_PROGRAMS_DIR}"
+          _MAX_DURATION_SECONDS: "${_MAX_DURATION_SECONDS}"
+          _EVALUATION_MACHINE_TYPE: "${_EVALUATION_MACHINE_TYPE}"
+          _EVALUATION_PROVISIONING_MODEL: "${_EVALUATION_PROVISIONING_MODEL}"
+          _SERVICE_ACCOUNT_EMAIL: "${_SERVICE_ACCOUNT_EMAIL}"
+          _DELETE_SUCCEEDED_JOBS: "${_DELETE_SUCCEEDED_JOBS}"
+          _EVALUATION_MODE: "${_EVALUATION_MODE}"
+          _USER_EXPERIMENT_NAME: "${_USER_EXPERIMENT_NAME}"
+          _EVALUATOR_IMAGE_URI: "${_EVALUATOR_IMAGE_URI}"
+          _BOOT_DISK_IMAGE: "${_BOOT_DISK_IMAGE}"          
+          _ACCELERATOR_COUNT: "${_ACCELERATOR_COUNT}"
+          _ACCELERATOR_TYPE: "${_ACCELERATOR_TYPE}"
+    volumes:
+    - gcs:
+        remotePath: "${_CLOUD_BUCKET_NAME}"
+      mountPath: "${_MOUNT_PATH}"
+  taskCount: 1
+  parallelism: 1
+allocationPolicy:
+  instances:
+  - policy:
+      machineType: n2-standard-4
+      provisioningModel: STANDARD
+  serviceAccount:
+    email: "${_SERVICE_ACCOUNT_EMAIL}"
+logsPolicy:
+  destination: CLOUD_LOGGING

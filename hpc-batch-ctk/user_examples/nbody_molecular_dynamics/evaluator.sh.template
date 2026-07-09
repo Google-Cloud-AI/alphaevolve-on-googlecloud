@@ -1,0 +1,67 @@
+#!/bin/bash
+mkdir -p $OUTPUT_DIR/logs
+exec > >(tee -a $OUTPUT_DIR/logs/evaluator_${_CANDIDATE_PROGRAM_ID}_task_$BATCH_TASK_INDEX.log) 2>&1
+cd /app/experiment
+echo "[BATCH DEBUG] Bootstrapping node BATCH_TASK_INDEX=$BATCH_TASK_INDEX out of BATCH_TASK_COUNT=$BATCH_TASK_COUNT..."
+
+# Compile the C++ code dynamically on each node
+make nbody_sim > /app/experiment/simulation_output.txt 2>&1
+if [ $? -ne 0 ]; then
+  echo "[BATCH DEBUG] Compilation failed! Skipping simulation..."
+  touch "${_CANDIDATE_DIR}/compilation_failed_${BATCH_TASK_INDEX}"
+  if [ "$BATCH_TASK_INDEX" = "0" ]; then
+    python3 /app/src/alpha_evolve/cloud_evaluator.py
+  fi
+else
+  # Signal that this node compiled successfully
+  touch "${_CANDIDATE_DIR}/compilation_done_${BATCH_TASK_INDEX}"
+  
+  if [ "$BATCH_TASK_INDEX" = "0" ]; then
+    # Wait for all workers to boot and finish compilation
+    ALL_READY=true
+    TIMEOUT=90
+    START_TIME=$(date +%s)
+    while true; do
+      CURRENT_TIME=$(date +%s)
+      ELAPSED=$((CURRENT_TIME - START_TIME))
+      if [ $ELAPSED -ge $TIMEOUT ]; then
+        echo "Compilation failed: Timeout waiting for worker nodes compilation" > /app/experiment/simulation_output.txt
+        ALL_READY=false
+        break
+      fi
+      ANY_FAILED=false
+      ALL_DONE=true
+      for ((i=1; i<BATCH_TASK_COUNT; i++)); do
+        if [ -f "${_CANDIDATE_DIR}/compilation_failed_${i}" ]; then
+          ANY_FAILED=true
+          ALL_DONE=false
+          break
+        fi
+        if [ ! -f "${_CANDIDATE_DIR}/compilation_done_${i}" ]; then
+          ALL_DONE=false
+        fi
+      done
+      if [ "$ANY_FAILED" = "true" ]; then
+        echo "Compilation failed: One or more worker nodes failed compilation" > /app/experiment/simulation_output.txt
+        ALL_READY=false
+        break
+      fi
+      if [ "$ALL_DONE" = "true" ]; then
+        break
+      fi
+      sleep 2
+    done
+    if [ "$ALL_READY" = "true" ]; then
+      CORES_PER_NODE=$(nproc)
+      TOTAL_PROCS=$(($CORES_PER_NODE * $BATCH_TASK_COUNT))
+      echo "[Coordinator] Launching parallel MPI simulation (Detected ${CORES_PER_NODE} cores/node, spawning total of ${TOTAL_PROCS} processes)..."
+      mpirun --allow-run-as-root --oversubscribe --mca btl_tcp_if_exclude docker0,lo --mca oob_tcp_if_exclude docker0,lo --hostfile "$BATCH_HOSTS_FILE" -np ${TOTAL_PROCS} -npernode ${CORES_PER_NODE} /var/tmp/nbody_sim 5000 > /app/experiment/simulation_output.txt 2>&1
+      echo "=== CLUSTER SIMULATION OUTPUT ==="
+      cat /app/experiment/simulation_output.txt
+      echo "================================="
+    fi
+    python3 /app/src/alpha_evolve/cloud_evaluator.py
+  else
+    echo "[Worker node $BATCH_TASK_INDEX] coordinator active, waiting at exit barrier..."
+  fi
+fi

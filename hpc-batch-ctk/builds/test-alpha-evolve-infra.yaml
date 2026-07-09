@@ -1,0 +1,55 @@
+# Copyright 2026 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+---
+tags: [alpha-evolve, test, infra]
+timeout: 3600s
+steps:
+- id: test-deploy-infra
+  name: us-central1-docker.pkg.dev/$PROJECT_ID/hpc-toolkit-repo/test-runner
+  automapSubstitutions: true
+  script: |
+    #!/usr/bin/env bash
+    set -ex
+    
+    cd /workspace
+    export PATH=$PATH:/workspace
+    BLUEPRINT="alpha-evolve-infra.yaml"
+    gcloud auth list
+    gcloud config list
+    
+    # Generate random names
+    RANDOM_STRING=$(cat /dev/urandom | tr -dc 'a-z0-9' | fold -w 8 | head -n 1)
+    depl_name="ae-infra-${RANDOM_STRING}"
+    BUCKET_NAME="alpha-evolve-test-${RANDOM_STRING}"
+    echo "Using deployment name: ${depl_name} and bucket: gs://${BUCKET_NAME}"
+    
+    # Create bucket
+    gcloud storage buckets create gs://${BUCKET_NAME} --project=${PROJECT_ID} --location=us-central1 || true
+    
+    export GHPC_VALIDATION_LEVEL=ignore
+    cleanup() {
+      echo "Starting cleanup..."
+      gcluster destroy ~/alpha-evolve-infra-output/${depl_name} --auto-approve --skip colab
+      echo "Deleting bucket gs://${BUCKET_NAME}"
+      gcloud storage rm --recursive gs://${BUCKET_NAME} --project=${PROJECT_ID} --quiet || true
+    }
+    trap cleanup EXIT
+    gcluster deploy "$BLUEPRINT" -d alpha-evolve-deployment.yaml -o ~/alpha-evolve-infra-output --vars="project_id=${PROJECT_ID}" --vars="infra_deployment_name=${depl_name}" --vars="existing_bucket_name=${BUCKET_NAME}" --auto-approve -l IGNORE --skip colab
+    export ANSIBLE_HOST_KEY_CHECKING=false
+    ansible-playbook ansible_playbooks/test-validation/test-alpha-evolve-infra.yml \
+      --extra-vars="project=${PROJECT_ID} deployment_name=${depl_name} bucket_name=${BUCKET_NAME}"
+
+
+

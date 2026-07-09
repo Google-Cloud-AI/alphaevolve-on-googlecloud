@@ -1,0 +1,21 @@
+*EVOLVE-BLOCK-START
+M1 OUT1 IN1 SOURCE 0 NMOS
+M2 OUT2 IN2 SOURCE 0 NMOS
+R1 VDD OUT1 10k
+R2 VDD OUT2 10k
+I1 SOURCE 0 1mA
+
+*EVOLVE-BLOCK-END
+
+VDD VDD 0 5
+VIN1 IN1 0 SIN(0 10m 1k)
+VIN2 IN2 0 0
+
+.include CMOS.lib
+
+.tran 1us 2ms
+.meas tran max_out MAX v(OUT1) from=1ms to=2ms
+.meas tran min_out MIN v(OUT1) from=1ms to=2ms
+.meas tran avg_current AVG i(VDD) from=1ms to=2ms
+
+.end

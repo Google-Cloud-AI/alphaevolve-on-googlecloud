@@ -1,0 +1,220 @@
+# Copyright 2026 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+blueprint_name: alpha-evolve-platform
+
+vars:
+  # === GCP Project & Deployment Infrastructure ===
+  deployment_name: $(vars.infra_deployment_name)
+
+  # === Paths & Build Config (Internal) ===
+  cloud_build_dir: $(ghpc_stage("."))
+
+  # === Messaging (Pub/Sub) ===
+  pubsub_topic: $(vars.infra_deployment_name)-batch-notifications
+
+  # === AlphaEvolve API Config ===
+  region_code: global
+  location: global
+  base_url: discoveryengine.googleapis.com
+  collection: default_collection
+  engine: $(vars.infra_deployment_name)-experiment-engine # name of AE Discovery Engine
+  assistant: default_assistant # name of the assistant in AlphaEvolve, current default can't be changed.
+
+  # === Colab Enterprise VM Config ===
+  colab_machine_type: n2-standard-4
+  mount_path: "/mnt/disks/share"
+
+  # === Internal Batch Configuration ===
+  controller_batch_config_file: $(ghpc_stage("./infrastructure/batch_configs/controller-batch.yaml"))
+  validation_batch_config_file: $(ghpc_stage("./infrastructure/batch_configs/validation-batch.yaml"))
+  validate_config_infra_script: $(ghpc_stage("./tools/validate_config_infra.sh"))
+
+deployment_groups:
+
+
+
+- group: validate-gcs-bucket
+  modules:
+    # Validate that the GCS bucket exists before proceeding
+    - id: validate-gcs-bucket
+      source: community/modules/scripts/gcloud
+      settings:
+        commands:
+        - create: |
+            bash $(vars.validate_config_infra_script) "$(vars.existing_bucket_name)" "$(vars.project_id)"
+          delete: "echo 'No cleanup needed for bucket validation'"
+
+
+- group: primary
+  modules:
+
+  # Enable necessary APIs
+  - id: apis
+    source: community/modules/project/service-enablement
+    settings:
+      gcp_service_list:
+      - compute.googleapis.com
+      - batch.googleapis.com
+      - pubsub.googleapis.com
+      - storage.googleapis.com
+      - artifactregistry.googleapis.com
+      - cloudbuild.googleapis.com
+      - discoveryengine.googleapis.com
+      - serviceusage.googleapis.com
+      - iam.googleapis.com
+
+  # Service account for the both controller and evaluator jobs
+  - id: service-account
+    source: modules/project/service-account
+    settings:
+      name: "sa"
+      project_roles:
+        - storage.objectAdmin
+        - pubsub.publisher
+        - iam.serviceAccountUser
+        - iam.serviceAccountTokenCreator
+        - batch.jobsEditor
+        - pubsub.editor
+        - artifactregistry.reader
+        - artifactregistry.writer
+        - batch.agentReporter
+        - logging.logWriter
+        - logging.viewer
+        - discoveryengine.user
+        - discoveryengine.editor
+        - compute.viewer
+        - aiplatform.colabEnterpriseUser
+        - aiplatform.colabEnterpriseAdmin
+
+
+  # GCS bucket for experiment data
+  - id: existing-bucket
+    source: modules/file-system/pre-existing-network-storage
+    settings:
+      remote_mount: $(vars.existing_bucket_name)
+      fs_type: gcsfuse
+      local_mount: /opt/jupyter/workspace/data
+      mount_options: defaults,_netdev,implicit_dirs,allow_other
+
+  # Upload baseline infrastructure configuration to GCS config/
+  - id: upload-infra-config
+    source: community/modules/scripts/gcloud
+    settings:
+      commands:
+      - create: |
+          cat <<EOF > variables-infra.env
+          export _PROJECT_ID="$(vars.project_id)"
+          export _REGION="$(vars.region)"
+          export _CLOUD_BUCKET_NAME="$(vars.existing_bucket_name)"
+          export _DEPLOYMENT_NAME="$(vars.deployment_name)"
+          export _PUBSUB_TOPIC="$(vars.pubsub_topic)"
+          export _MOUNT_PATH="$(vars.mount_path)"
+          export _SERVICE_ACCOUNT_EMAIL="$(service-account.service_account_email)"
+          export _REGION_CODE="$(vars.region_code)"
+          export _LOCATION="$(vars.location)"
+          export _BASE_URL="$(vars.base_url)"
+          export _COLLECTION="$(vars.collection)"
+          export _ENGINE="$(vars.engine)"
+          export _ASSISTANT="$(vars.assistant)"
+          EOF
+          gcloud storage cp variables-infra.env gs://$(vars.existing_bucket_name)/config/variables-infra.env --project=$(vars.project_id)
+          gcloud storage cp $(vars.cloud_build_dir)/infrastructure/requirements.txt gs://$(vars.existing_bucket_name)/config/requirements.txt --project=$(vars.project_id)
+          gcloud storage cp $(vars.controller_batch_config_file) gs://$(vars.existing_bucket_name)/config/controller-batch.yaml --project=$(vars.project_id)
+          gcloud storage cp $(vars.validation_batch_config_file) gs://$(vars.existing_bucket_name)/config/validation-batch.yaml --project=$(vars.project_id)
+        delete: "gcloud storage rm gs://$(vars.existing_bucket_name)/config/variables-infra.env --project=$(vars.project_id) || true; gcloud storage rm gs://$(vars.existing_bucket_name)/config/requirements.txt --project=$(vars.project_id) || true; gcloud storage rm gs://$(vars.existing_bucket_name)/config/controller-batch.yaml --project=$(vars.project_id) || true; gcloud storage rm gs://$(vars.existing_bucket_name)/config/validation-batch.yaml --project=$(vars.project_id) || true"
+
+
+# Pub/Sub topic for Batch job notifications
+
+- group: pubsub-topic
+  modules:
+  - id: pubsubs
+    source: community/modules/scripts/gcloud
+    settings:
+      commands:
+      - create: |
+          gcloud pubsub topics describe $(vars.pubsub_topic) --project=$(vars.project_id) >/dev/null 2>&1 || gcloud pubsub topics create $(vars.pubsub_topic) --project=$(vars.project_id)
+          PROJECT_NUMBER=`gcloud projects describe $(vars.project_id) --format="value(projectNumber)"`
+          gcloud pubsub topics add-iam-policy-binding $(vars.pubsub_topic) \
+            --project=$(vars.project_id) \
+            --member="serviceAccount:service-\$PROJECT_NUMBER@gcp-sa-cloudbatch.iam.gserviceaccount.com" \
+            --role="roles/pubsub.publisher"
+        delete: "gcloud pubsub topics delete $(vars.pubsub_topic) --project=$(vars.project_id) --quiet"
+- group: create-discovery-engine
+  modules:
+  - id: create-engine
+    source: community/modules/scripts/gcloud
+    settings:
+      commands:
+      - create: |
+          curl -s -f -H "Authorization: Bearer `gcloud auth application-default print-access-token`" -H "x-goog-user-project: $(vars.project_id)" "https://discoveryengine.googleapis.com/v1alpha/projects/$(vars.project_id)/locations/global/collections/default_collection/engines/$(vars.engine)" >/dev/null 2>&1 || curl -X POST "https://discoveryengine.googleapis.com/v1alpha/projects/$(vars.project_id)/locations/global/collections/default_collection/engines?engineId=$(vars.engine)" \
+            -H "Content-Type: application/json" \
+            -H "x-goog-user-project: $(vars.project_id)" \
+            -H "Authorization: Bearer `gcloud auth application-default print-access-token`" \
+            -d "{\"display_name\": \"$(vars.engine)\", \"data_store_ids\": [], \"solution_type\": \"SOLUTION_TYPE_GENERATIVE_CHAT\"}" 
+        delete: |-
+          curl -X DELETE "https://discoveryengine.googleapis.com/v1alpha/projects/$(vars.project_id)/locations/global/collections/default_collection/engines/$(vars.engine)" -H "Content-Type: application/json" -H "x-goog-user-project: $(vars.project_id)" -H "Authorization: Bearer `gcloud auth application-default print-access-token`"
+      - create: |
+          curl -s -f -H "Authorization: Bearer `gcloud auth application-default print-access-token`" -H "x-goog-user-project: $(vars.project_id)" "https://discoveryengine.googleapis.com/v1alpha/projects/$(vars.project_id)/locations/global/collections/default_collection/engines/$(vars.engine)/assistants/$(vars.assistant)" >/dev/null 2>&1 || curl -X POST "https://discoveryengine.googleapis.com/v1alpha/projects/$(vars.project_id)/locations/global/collections/default_collection/engines/$(vars.engine)/assistants?assistantId=$(vars.assistant)" \
+            -H "Content-Type: application/json" \
+            -H "x-goog-user-project: $(vars.project_id)" \
+            -H "Authorization: Bearer `gcloud auth application-default print-access-token`" \
+            -d "{\"display_name\": \"$(vars.assistant)\", \"description\": null, \"generation_config\": null, \"web_grounding_type\": \"WEB_GROUNDING_TYPE_UNSPECIFIED\", \"enabled_actions\": null, \"customer_policy\": null}" 
+        delete: |-
+          curl -X DELETE "https://discoveryengine.googleapis.com/v1alpha/projects/$(vars.project_id)/locations/global/collections/default_collection/engines/$(vars.engine)/assistants/$(vars.assistant)" -H "Content-Type: application/json" -H "x-goog-user-project: $(vars.project_id)" -H "Authorization: Bearer `gcloud auth application-default print-access-token`"
+
+- group: run-validation-ae-api
+  modules:
+  - id: run-validation-ae-api
+    source: community/modules/scripts/gcloud
+    settings:
+      commands:
+      - create: |
+          export _PROJECT_ID="$(vars.project_id)"
+          export _BASE_URL="$(vars.base_url)"
+          export _LOCATION="$(vars.location)"
+          export _COLLECTION="$(vars.collection)"
+          export _ENGINE="$(vars.engine)"
+          export _ASSISTANT="$(vars.assistant)"
+          echo "Installing required Python packages for AlphaEvolve API validation..."
+          python3 -m venv .venv-validation
+          .venv-validation/bin/pip install --no-cache-dir --require-hashes --index-url https://pypi.org/simple -r $(vars.cloud_build_dir)/infrastructure/requirements.txt
+          echo "Running AlphaEvolve API validation..."
+          .venv-validation/bin/python3 $(vars.cloud_build_dir)/tools/validate_ae_api.py
+        delete: "rm -rf .venv-validation || true"
+
+# VM for colab Notebook
+- group: colab
+  modules:
+  - id: colab-setup
+    source: community/modules/scripts/gcloud
+    settings:
+      commands:
+      - create: |
+          TEMPLATE_ID="$(vars.deployment_name)-\$RANDOM\$RANDOM"
+          echo "\$TEMPLATE_ID" > /tmp/ae-template-id-$(vars.project_id)-$(vars.region)-$(vars.deployment_name)
+          gcloud colab runtime-templates create --runtime-template-id="\$TEMPLATE_ID" --display-name="\$TEMPLATE_ID" --machine-type=$(vars.colab_machine_type) --project=$(vars.project_id) --region=$(vars.region) --set-env-vars=_CLOUD_BUCKET_NAME=$(vars.existing_bucket_name)
+        delete: |-
+          gcloud colab runtime-templates list --project=$(vars.project_id) --region=$(vars.region) --format='value(name)' | grep -E '^$(vars.deployment_name)(-.+)?$' | xargs -r -I {} gcloud colab runtime-templates delete --project=$(vars.project_id) --region=$(vars.region) {} --quiet ; rm -f /tmp/ae-template-id-$(vars.project_id)-$(vars.region)-$(vars.deployment_name)
+      - create: |
+          read -r TEMPLATE_ID < /tmp/ae-template-id-$(vars.project_id)-$(vars.region)-$(vars.deployment_name)
+          RUNTIME_ID="$(vars.deployment_name)-\$RANDOM\$RANDOM"
+          gcloud colab runtimes create --runtime-id="\$RUNTIME_ID" --display-name="\$RUNTIME_ID" --runtime-template="\$TEMPLATE_ID" --project=$(vars.project_id) --region=$(vars.region)
+        delete: |-
+          gcloud colab runtimes list --project=$(vars.project_id) --region=$(vars.region) --format='value(name)' | grep -E '^$(vars.deployment_name)(-.+)?$' | xargs -r -I {} gcloud colab runtimes delete --project=$(vars.project_id) --region=$(vars.region) {} --quiet
+      - create: |
+          gcloud storage cp $(vars.cloud_build_dir)/google_framework/notebook/run_notebook.ipynb gs://$(vars.existing_bucket_name)/notebook/run_notebook.ipynb --project=$(vars.project_id)
+        delete: |-
+          gcloud storage rm gs://$(vars.existing_bucket_name)/notebook/run_notebook.ipynb --project=$(vars.project_id) || true

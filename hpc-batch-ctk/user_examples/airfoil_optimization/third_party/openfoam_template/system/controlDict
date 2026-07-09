@@ -1,0 +1,69 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+  =========                 |
+  \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox
+   \\    /   O peration     | Website:  https://openfoam.org
+    \\  /    A nd           | Version:  6
+     \\/     M anipulation  |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       dictionary;
+    location    "system";
+    object      controlDict;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+application     simpleFoam;
+
+startFrom       startTime;
+
+startTime       0;
+
+stopAt          endTime;
+
+endTime         2000;
+
+deltaT          1;
+
+writeControl    timeStep;
+
+writeInterval   250;
+
+purgeWrite      0;
+
+writeFormat     ascii;
+
+writePrecision  6;
+
+writeCompression off;
+
+timeFormat      general;
+
+timePrecision   6;
+
+runTimeModifiable true;
+
+functions {
+  forceCoeffs {
+    type forceCoeffs;
+    libs ("libforces.so");
+    patches (airfoil); // Replace with the name of your patch
+    p p;
+    U U;
+    rho rhoInf; // For incompressible solvers, use rhoInf
+    rhoInf 1.225; // Reference density (e.g., for air at sea level)
+    CofR (0 0 0); // Center of rotation; adjust as needed
+    liftDir ({{lift_x}} {{lift_y}} {{lift_z}}); // Direction of lift; adjust based on your setup
+    dragDir ({{drag_x}} {{drag_y}} {{drag_z}}); // Direction of drag; adjust based on your setup
+    pitchAxis (0 0 1); // Axis for pitching moment; adjust as needed
+    magUInf {{v_magnitude}}; // Free-stream velocity magnitude; set accordingly
+    lRef 1; // Reference length; characteristic length of your model
+    Aref 1; // Reference area; projected area perpendicular to flow
+    outputControl timeStep;
+    outputInterval 1;
+  }
+}
+
+// ************************************************************************* //
