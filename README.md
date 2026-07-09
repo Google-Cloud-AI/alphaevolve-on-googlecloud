@@ -30,7 +30,7 @@ environments — from a pure-Python loop with zero infrastructure to GPU trainin
 - [How AlphaEvolve works](#how-alphaevolve-works)
 - [Examples](#examples)
 - [Using the `alpha_evolve` library](#using-the-alpha_evolve-library)
-- [Using the AlphaEvolve Skills](#using-the-alpha-evolve-skills)
+- [Using the AlphaEvolve Skills](#using-the-alphaevolve-skills)
 - [Configuration](#configuration)
 - [Repository structure](#repository-structure)
 - [Cost](#cost)
