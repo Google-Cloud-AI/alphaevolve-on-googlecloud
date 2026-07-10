@@ -30,6 +30,7 @@ environments — from a pure-Python loop with zero infrastructure to GPU trainin
 - [How AlphaEvolve works](#how-alphaevolve-works)
 - [Examples](#examples)
 - [Using the `alpha_evolve` library](#using-the-alpha_evolve-library)
+- [Using the AlphaEvolve Skills](#using-the-alphaevolve-skills)
 - [Configuration](#configuration)
 - [Repository structure](#repository-structure)
 - [Cost](#cost)
@@ -217,6 +218,24 @@ def construct_packing(n, random_seed):
     ...   # AlphaEvolve rewrites everything inside this block
 # EVOLVE-BLOCK-END
 ```
+
+---
+## Using the AlphaEvolve Skills
+
+The AlphaEvolve skills allow you to run AlphaEvolve experiments directly from an agentic coding assistant (e.g. Antigravity). Using these skills, your coding assistant will guide you through the entire AlphaEvolve workflow, including configuring the experiment, running the evolutionary loop, monitoring progress, and integrating the best result back into your code.
+
+There are 6 AlphaEvolve skills included, with `README.md` and `SKILL.md` files provided for each skill.
+
+| Skill | Role |
+| --- | --- |
+| [`alpha_evolve_experiment_design`](skills/alpha_evolve_experiment_design) | Scaffolds new experiments via a test-driven workflow. |
+| [`alpha_evolve_runner`](skills/alpha_evolve_runner) | Configures backend requirements and launches the experiment. |
+| [`alpha_evolve_monitor`](skills/alpha_evolve_monitor) | Monitors running experiments and manages the local control loop. |
+| [`alpha_evolve_post_experiment`](skills/alpha_evolve_post_experiment) | Analyzes completed runs and integrates the best evolved code. |
+| [`alpha_evolve_orchestrator`](skills/alpha_evolve_orchestrator) | Master workflow skill that chains the core skills end-to-end. |
+| [`alpha_evolve_consultant`](skills/alpha_evolve_consultant) | Answers questions based on the expert reference guide. |
+
+Refer to the `README.md` file in the skills folder for instructions to get started with the skills.
 
 ---
 

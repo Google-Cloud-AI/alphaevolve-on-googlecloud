@@ -1,0 +1,9 @@
+[project]
+name = "circle-packing"
+version = "0.1.0"
+description = "Circle Packing in Unit Square — AlphaEvolve experiment"
+requires-python = ">=3.11"
+dependencies = [
+    "numpy",
+    "pytest",
+]
