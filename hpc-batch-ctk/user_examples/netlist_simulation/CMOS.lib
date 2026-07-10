@@ -1,0 +1,2 @@
+.model NMOS nmos (level=1)
+.model PMOS pmos (level=1)

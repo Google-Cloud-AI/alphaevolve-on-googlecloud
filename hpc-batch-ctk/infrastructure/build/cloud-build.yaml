@@ -1,0 +1,89 @@
+# Copyright 2026 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+steps:
+# Run unit tests before building images
+- name: 'python:3.12-slim-bookworm'
+  entrypoint: 'sh'
+  args: 
+  - '-c'
+  - |
+    echo "Installing pytest and test dependencies..."
+    python -m pip install --no-cache-dir --require-hashes -r infrastructure/requirements.txt
+    echo "Running AlphaEvolve unit test suite..."
+    PYTHONPATH=google_framework:google_framework/alpha_evolve python -m pytest google_framework/alpha_evolve/tests/ -v -s
+
+# Build the controller image
+- name: 'gcr.io/cloud-builders/docker'
+  args: 
+  - 'build'
+  - '-t'
+  - '${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_REPO_NAME}/${_USER_EXPERIMENT_NAME}-controller:latest'
+  - '-f'
+  - 'infrastructure/build/controller.Dockerfile'
+  - '--build-arg'
+  - 'BASE_IMAGE=${_BASE_CONTROLLER_IMAGE}'
+  - '--build-arg'
+  - 'PROJECT_ID=${_PROJECT_ID}'
+  - '--build-arg'
+  - 'BOOT_DISK_IMAGE=${_BOOT_DISK_IMAGE}'
+  - '--build-arg'
+  - 'REPO_NAME=${_REPO_NAME}'
+  - '--build-arg'
+  - 'EXAMPLE_DIR=${_EXAMPLE_DIR}'
+  - '--build-arg'
+  - 'USER_EXPERIMENT_NAME=${_USER_EXPERIMENT_NAME}'
+  - '.'
+
+# Build the evaluator image
+- name: 'gcr.io/cloud-builders/docker'
+  entrypoint: 'bash'
+  args: 
+  - '-c'
+  - |
+    if [ -f "${_EXAMPLE_DIR}/evaluator.Dockerfile" ]; then
+      echo "Found custom evaluator Dockerfile in ${_EXAMPLE_DIR}. Building..."
+      docker build \
+        -t ${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_REPO_NAME}/${_USER_EXPERIMENT_NAME}-evaluator:latest \
+        -f ${_EXAMPLE_DIR}/evaluator.Dockerfile \
+        --build-arg BASE_IMAGE=${_BASE_EVALUATOR_IMAGE} \
+        --build-arg PROJECT_ID=${_PROJECT_ID} \
+        .
+    else
+      echo "No custom evaluator Dockerfile found in ${_EXAMPLE_DIR}. Skipping evaluator build."
+    fi
+
+# Push the controller image
+- name: 'gcr.io/cloud-builders/docker'
+  args: 
+  - 'push'
+  - '${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_REPO_NAME}/${_USER_EXPERIMENT_NAME}-controller:latest'
+
+# Push the evaluator image
+- name: 'gcr.io/cloud-builders/docker'
+  entrypoint: 'bash'
+  args:
+  - '-c'
+  - |
+    if [ -f "${_EXAMPLE_DIR}/evaluator.Dockerfile" ]; then
+      echo "Pushing custom evaluator image..."
+      docker push ${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_REPO_NAME}/${_USER_EXPERIMENT_NAME}-evaluator:latest
+    else
+      echo "Skipping evaluator push."
+    fi
+
+# Images are pushed manually via docker push steps above
+
+options:
+  logging: CLOUD_LOGGING_ONLY

@@ -1,0 +1,56 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+  =========                 |
+  \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox
+   \\    /   O peration     | Website:  https://openfoam.org
+    \\  /    A nd           | Version:  6
+     \\/     M anipulation  |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       volScalarField;
+    object      nuTilda;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+dimensions      [0 2 -1 0 0 0 0];
+
+// Based on https://turbmodels.larc.nasa.gov/spalart.html 
+// Note that on that page, $\hat \nu = \tilde nu$. 
+// They give $\hat \nu_\text{wall} = 0$, and $\hat \nu_\text{farfield} = 3 \nu_\infty \quad \text{to} 5 \nu_\infty$. 
+// I've taken 3 times the kinematic viscosity of air, here. 
+// A quick test for one airfoil at 100 m/s shows no difference here at all. 
+// \begin{table}[H]
+//    \begin{tabular}{l | l l l}
+//        Case & $C_l$ & $C_d$ & $C_l/C_d$ \\ \hline 
+//        $0.14$ & 0.516667 & -0.000555 & -931.013514 \\
+//        $4 \times 10^{-5}$ & 1.13645 & -0.0742927 & -15.295453 \\
+//        $4.5 \times 10^{-5}$ & 1.1369 & -0.0743574 & -15.287780 \\
+//        $7 \times 10^{-6}$ & 1.13665 & -0.0743269 & -15.290234 \\
+//    \end{tabular}
+//    \caption {Spalart-Allmaras turbulence parameters, with $C_l/C_d$ added.}
+//\end{table}
+
+internalField   uniform 4.5e-5; 
+
+boundaryField
+{
+    farfield
+    {
+        type            freestream;
+        freestreamValue $internalField;
+    }
+    airfoil
+    {
+        type            fixedValue;
+        value           uniform 0;
+    }
+
+    frontAndBack
+    {
+        type            empty;
+    }
+}
+
+// ************************************************************************* //

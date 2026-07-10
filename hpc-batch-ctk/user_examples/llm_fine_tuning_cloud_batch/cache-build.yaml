@@ -1,0 +1,72 @@
+# Copyright 2026 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Cloud Build CI/CD pipeline to download and cache Gemma 4 E2B weights and dataset to GCS
+steps:
+- name: 'python:3.12-slim'
+  entrypoint: 'bash'
+  args:
+  - '-c'
+  - |
+    pip install --quiet huggingface_hub datasets google-cloud-storage &&
+    python3 -c "
+    import glob, os
+    from huggingface_hub import snapshot_download
+    from datasets import load_dataset
+    from google.cloud import storage
+
+    bucket_name = '${_BUCKET_NAME}'
+    client = storage.Client()
+    bucket = client.bucket(bucket_name)
+
+    print(f'Checking if model is cached in gs://{bucket_name}/model_cache/...')
+    blobs = list(bucket.list_blobs(prefix='model_cache/', max_results=1))
+    if blobs:
+        print('Model already cached in GCS. Skipping download.')
+    else:
+        print('Downloading google/gemma-4-E2B-it from Hugging Face...')
+        hf_token = '${_HF_TOKEN}'
+        model_path = snapshot_download('google/gemma-4-E2B-it', token=hf_token if hf_token else None)
+        print(f'Uploading model weights to gs://{bucket_name}/model_cache/...')
+        for filepath in glob.glob(f'{model_path}/**', recursive=True):
+            if os.path.isfile(filepath):
+                rel = os.path.relpath(filepath, model_path)
+                blob = bucket.blob(f'model_cache/{rel}')
+                blob.upload_from_filename(filepath)
+        print('Model successfully uploaded.')
+
+    print(f'Checking if dataset is cached in gs://{bucket_name}/dataset_cache/...')
+    blobs = list(bucket.list_blobs(prefix='dataset_cache/', max_results=1))
+    if blobs:
+        print('Dataset already cached in GCS. Skipping download.')
+    else:
+        print('Downloading NousResearch/hermes-function-calling-v1...')
+        ds = load_dataset('NousResearch/hermes-function-calling-v1', 'func_calling_singleturn', split='train')
+        ds = ds.shuffle(seed=42).select(range(min(2500, len(ds))))
+        ds.save_to_disk('/tmp/ds_cache')
+        print(f'Uploading dataset to gs://{bucket_name}/dataset_cache/...')
+        for filepath in glob.glob('/tmp/ds_cache/**', recursive=True):
+            if os.path.isfile(filepath):
+                rel = os.path.relpath(filepath, '/tmp/ds_cache')
+                blob = bucket.blob(f'dataset_cache/{rel}')
+                blob.upload_from_filename(filepath)
+        print('Dataset successfully uploaded.')
+    "
+
+substitutions:
+  _BUCKET_NAME: alpha-evolve
+  _HF_TOKEN: ''
+
+options:
+  logging: CLOUD_LOGGING_ONLY

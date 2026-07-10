@@ -1,0 +1,168 @@
+# Copyright 2026 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+---
+- name: Validate infra deployment resources
+  hosts: localhost
+  gather_facts: false
+  tasks:
+  - name: Verify Pub/Sub topic exists
+    changed_when: false
+    ansible.builtin.command: gcloud pubsub topics describe {{ deployment_name }}-batch-notifications --project={{ project }}
+
+  - name: Validate Pub/Sub push and pull functionality
+    block:
+    - name: Create temporary validation Pub/Sub subscription
+      changed_when: false
+      ansible.builtin.command: gcloud pubsub subscriptions create test-val-sub-{{ deployment_name }} --topic={{ deployment_name }}-batch-notifications --project={{ project }}
+
+    - name: Publish test validation message to Pub/Sub topic
+      changed_when: false
+      ansible.builtin.command: gcloud pubsub topics publish {{ deployment_name }}-batch-notifications --message="alpha_evolve_pubsub_test" --project={{ project }}
+
+    - name: Pull message from temporary validation Pub/Sub subscription
+      changed_when: false
+      ansible.builtin.command: gcloud pubsub subscriptions pull test-val-sub-{{ deployment_name }} --auto-ack --limit=1 --format="value(message.data)" --project={{ project }}
+      register: pubsub_pull_result
+      failed_when: "'alpha_evolve_pubsub_test' not in pubsub_pull_result.stdout"
+    always:
+    - name: Delete temporary validation Pub/Sub subscription
+      changed_when: false
+      ignore_errors: true
+      ansible.builtin.command: gcloud pubsub subscriptions delete test-val-sub-{{ deployment_name }} --project={{ project }} --quiet
+
+  - name: Verify Service Account exists
+    changed_when: false
+    ansible.builtin.command: gcloud iam service-accounts describe {{ deployment_name }}-sa@{{ project }}.iam.gserviceaccount.com --project={{ project }}
+  - name: Verify Pub/Sub API is enabled
+    changed_when: false
+    ansible.builtin.command: gcloud services list --enabled --filter="config.name=pubsub.googleapis.com" --project={{ project }}
+  - name: Verify Discovery Engine exists
+    changed_when: false
+    ansible.builtin.shell: >
+      curl -s -o /dev/null -w "%{http_code}"
+      -X GET "https://discoveryengine.googleapis.com/v1alpha/projects/{{ project }}/locations/global/collections/default_collection/engines/{{ deployment_name }}-experiment-engine"
+      -H "x-goog-user-project: {{ project }}"
+      -H "Authorization: Bearer $(gcloud auth application-default print-access-token)"
+    register: result
+    failed_when: result.stdout != "200"
+  - name: Verify Discovery Engine Assistant exists
+    changed_when: false
+    ansible.builtin.shell: >
+      curl -s -o /dev/null -w "%{http_code}"
+      -X GET "https://discoveryengine.googleapis.com/v1alpha/projects/{{ project }}/locations/global/collections/default_collection/engines/{{ deployment_name }}-experiment-engine/assistants/default_assistant"
+      -H "x-goog-user-project: {{ project }}"
+      -H "Authorization: Bearer $(gcloud auth application-default print-access-token)"
+    register: assistant_result
+    failed_when: assistant_result.stdout != "200"
+
+  - name: Verify Service Account has Storage Admin role
+    changed_when: false
+    ansible.builtin.command: >
+      gcloud projects get-iam-policy {{ project }}
+      --filter="bindings.members:serviceAccount:{{ deployment_name }}-sa@{{ project }}.iam.gserviceaccount.com AND bindings.role:roles/storage.objectAdmin"
+      --format="value(bindings.role)"
+    register: role_check
+    failed_when: role_check.stdout == ""
+
+  - name: Verify Service Account has Batch Jobs Editor role
+    changed_when: false
+    ansible.builtin.command: >
+      gcloud projects get-iam-policy {{ project }}
+      --filter="bindings.members:serviceAccount:{{ deployment_name }}-sa@{{ project }}.iam.gserviceaccount.com AND bindings.role:roles/batch.jobsEditor"
+      --format="value(bindings.role)"
+    register: batch_editor_check
+    failed_when: batch_editor_check.stdout == ""
+
+  - name: Verify Service Account has Batch Agent Reporter role
+    changed_when: false
+    ansible.builtin.command: >
+      gcloud projects get-iam-policy {{ project }}
+      --filter="bindings.members:serviceAccount:{{ deployment_name }}-sa@{{ project }}.iam.gserviceaccount.com AND bindings.role:roles/batch.agentReporter"
+      --format="value(bindings.role)"
+    register: batch_reporter_check
+    failed_when: batch_reporter_check.stdout == ""
+
+  - name: Verify Service Account has Pub/Sub Publisher role
+    changed_when: false
+    ansible.builtin.command: >
+      gcloud projects get-iam-policy {{ project }}
+      --filter="bindings.members:serviceAccount:{{ deployment_name }}-sa@{{ project }}.iam.gserviceaccount.com AND bindings.role:roles/pubsub.publisher"
+      --format="value(bindings.role)"
+    register: pubsub_publisher_check
+    failed_when: pubsub_publisher_check.stdout == ""
+
+  - name: Verify Service Account has Pub/Sub Editor role
+    changed_when: false
+    ansible.builtin.command: >
+      gcloud projects get-iam-policy {{ project }}
+      --filter="bindings.members:serviceAccount:{{ deployment_name }}-sa@{{ project }}.iam.gserviceaccount.com AND bindings.role:roles/pubsub.editor"
+      --format="value(bindings.role)"
+    register: pubsub_editor_check
+    failed_when: pubsub_editor_check.stdout == ""
+
+  - name: Verify Service Account has Artifact Registry Reader role
+    changed_when: false
+    ansible.builtin.command: >
+      gcloud projects get-iam-policy {{ project }}
+      --filter="bindings.members:serviceAccount:{{ deployment_name }}-sa@{{ project }}.iam.gserviceaccount.com AND bindings.role:roles/artifactregistry.reader"
+      --format="value(bindings.role)"
+    register: ar_reader_check
+    failed_when: ar_reader_check.stdout == ""
+
+  - name: Verify Service Account has Artifact Registry Writer role
+    changed_when: false
+    ansible.builtin.command: >
+      gcloud projects get-iam-policy {{ project }}
+      --filter="bindings.members:serviceAccount:{{ deployment_name }}-sa@{{ project }}.iam.gserviceaccount.com AND bindings.role:roles/artifactregistry.writer"
+      --format="value(bindings.role)"
+    register: ar_writer_check
+    failed_when: ar_writer_check.stdout == ""
+
+  - name: Verify Service Account has Logging Log Writer role
+    changed_when: false
+    ansible.builtin.command: >
+      gcloud projects get-iam-policy {{ project }}
+      --filter="bindings.members:serviceAccount:{{ deployment_name }}-sa@{{ project }}.iam.gserviceaccount.com AND bindings.role:roles/logging.logWriter"
+      --format="value(bindings.role)"
+    register: log_writer_check
+    failed_when: log_writer_check.stdout == ""
+
+  - name: Verify Service Account has Discovery Engine User role
+    changed_when: false
+    ansible.builtin.command: >
+      gcloud projects get-iam-policy {{ project }}
+      --filter="bindings.members:serviceAccount:{{ deployment_name }}-sa@{{ project }}.iam.gserviceaccount.com AND bindings.role:roles/discoveryengine.user"
+      --format="value(bindings.role)"
+    register: de_user_check
+    failed_when: de_user_check.stdout == ""
+
+  - name: Verify Service Account has Discovery Engine Editor role
+    changed_when: false
+    ansible.builtin.command: >
+      gcloud projects get-iam-policy {{ project }}
+      --filter="bindings.members:serviceAccount:{{ deployment_name }}-sa@{{ project }}.iam.gserviceaccount.com AND bindings.role:roles/discoveryengine.editor"
+      --format="value(bindings.role)"
+    register: de_editor_check
+    failed_when: de_editor_check.stdout == ""
+
+  - name: Verify Service Account has IAM Service Account User role
+    changed_when: false
+    ansible.builtin.command: >
+      gcloud projects get-iam-policy {{ project }}
+      --filter="bindings.members:serviceAccount:{{ deployment_name }}-sa@{{ project }}.iam.gserviceaccount.com AND bindings.role:roles/iam.serviceAccountUser"
+      --format="value(bindings.role)"
+    register: sa_user_check
+    failed_when: sa_user_check.stdout == ""
+

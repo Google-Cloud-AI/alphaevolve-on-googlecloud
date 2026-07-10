@@ -1,0 +1,62 @@
+# Copyright 2026 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+taskGroups:
+- taskSpec:
+    runnables:
+    - container:
+        imageUri: "${_EVALUATOR_IMAGE_URI}"
+        volumes:
+        - "${_MOUNT_PATH}:${_MOUNT_PATH}"
+    volumes:
+    - gcs:
+        remotePath: "${_CLOUD_BUCKET_NAME}"
+      mountPath: "${_MOUNT_PATH}"
+    environment:
+      variables:
+        _PROJECT_ID: "${_PROJECT_ID}"
+        OUTPUT_DIR: "${_MOUNT_PATH}"
+        _JOB_ID: "${_JOB_ID}"
+        _CANDIDATE_PROGRAM_ID: "${_CANDIDATE_PROGRAM_ID}"
+        _CLIENT_EVALUATOR_SCRIPT: "${_CLIENT_EVALUATOR_SCRIPT}"
+        _CLIENT_EVALUATOR_METHOD: "${_CLIENT_EVALUATOR_METHOD}"
+        _PROGRAMS_DIR: "${_PROGRAMS_DIR}"
+        _MOUNT_PATH: "${_MOUNT_PATH}"
+        _CLOUD_BUCKET_NAME: "${_CLOUD_BUCKET_NAME}"
+        _USER_EXPERIMENT_NAME: "${_USER_EXPERIMENT_NAME}"
+        _CANDIDATE_DIR: "${_MOUNT_PATH}/${_USER_EXPERIMENT_NAME}/${_PROGRAMS_DIR}/${_JOB_ID}"
+    maxRunDuration: "${_MAX_DURATION_SECONDS}s"
+    maxRetryCount: 3
+    lifecyclePolicies:
+    - action: RETRY_TASK
+      actionCondition:
+        exitCodes:
+        - 50001
+  taskCount: 1
+  parallelism: 1
+allocationPolicy:
+  instances:
+  - policy:
+      machineType: "${_EVALUATION_MACHINE_TYPE}"
+      provisioningModel: "${_EVALUATION_PROVISIONING_MODEL}"
+      bootDisk:
+        image: "${_BOOT_DISK_IMAGE}"
+  serviceAccount:
+    email: "${_SERVICE_ACCOUNT_EMAIL}"
+logsPolicy:
+  destination: CLOUD_LOGGING
+notifications:
+- pubsubTopic: "projects/${_PROJECT_ID}/topics/${_PUBSUB_TOPIC}"
+  message:
+    type: JOB_STATE_CHANGED
