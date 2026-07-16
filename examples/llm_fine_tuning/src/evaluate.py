@@ -30,11 +30,12 @@ from dotenv import load_dotenv
 # Load .env from the example directory, then fall back to repo root
 _example_env = os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env")
 load_dotenv(_example_env)
-load_dotenv()  # repo-root .env as fallback
+load_dotenv()
 
 logger = logging.getLogger(__name__)
 
 METRIC_NAME = "neg_eval_loss"
+SEED_BOOTSTRAP_SCORE = -1e12
 
 EVALUATOR_URL = os.getenv("EVALUATOR_URL")
 if not EVALUATOR_URL:
