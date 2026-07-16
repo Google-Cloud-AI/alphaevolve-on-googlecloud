@@ -46,13 +46,33 @@ GOOGLE_GREY = "#5F6368"
 GOOGLE_LIGHT_GREY = "#DADCE0"
 GOOGLE_BG = "#FFFFFF"
 
+# Scores at or below this magnitude are bootstrap sentinels — e.g. an
+# un-evaluated seed created with SEED_BOOTSTRAP_SCORE (-1e12) in run_evolution.py
+# — not real measurements. They are kept out of every statistic and plot. Genuine
+# neg_eval_loss values are small (roughly -1 to -100 including failed evals), so
+# this threshold never excludes a real result.
+SENTINEL_SCORE_THRESHOLD = -1e11
+
+
+def _is_real_score(score: float) -> bool:
+    """True only for a finite, non-sentinel (actually-measured) score."""
+    return np.isfinite(score) and score > SENTINEL_SCORE_THRESHOLD
+
 
 def generate_report(
     programs: list[dict],
-    seed_score: float,
+    seed_score: float | None,
     save_dir: str | None = None,
 ):
     """Generate an improvement report and save the best evolved program.
+
+    Args:
+        programs: Programs returned by the AlphaEvolve API.
+        seed_score: The seed's real ``neg_eval_loss`` when it was actually
+            evaluated (BASELINE_SEED=true), or ``None`` when the seed evaluation
+            was skipped. A skipped seed is bootstrapped into the database with a
+            sentinel score that must never be reported as a real baseline.
+        save_dir: Output directory (defaults to ``report/``).
 
     Outputs:
       - Console summary with eval-loss progression
@@ -66,14 +86,17 @@ def generate_report(
     os.makedirs(save_dir, exist_ok=True)
 
     scores = [get_score(p, METRIC_NAME) for p in programs]
-    valid_idx = [i for i, s in enumerate(scores) if np.isfinite(s)]
+    valid_idx = [i for i, s in enumerate(scores) if _is_real_score(s)]
     valid_programs = [programs[i] for i in valid_idx]
     valid_scores = [scores[i] for i in valid_idx]
     eval_losses = [-s for s in valid_scores]
 
-    best_score = max(valid_scores) if valid_scores else seed_score
-    best_loss = -best_score
-    seed_loss = -seed_score
+    # A seed baseline is only meaningful when the seed was actually evaluated.
+    has_seed_baseline = seed_score is not None and _is_real_score(seed_score)
+    seed_loss = -seed_score if has_seed_baseline else None
+
+    best_score = max(valid_scores) if valid_scores else None
+    best_loss = -best_score if best_score is not None else None
 
     # Sort chronologically for evolution chart
     chrono_programs = sorted(programs, key=lambda p: p.get("name", ""))
@@ -84,7 +107,7 @@ def generate_report(
         seed_loss, best_loss,
         n_total=len(programs),
         n_valid=len(valid_programs),
-        n_failed=len(programs) - len(valid_programs),
+        n_unscored=len(programs) - len(valid_programs),
         all_losses=eval_losses,
     )
 
@@ -93,7 +116,8 @@ def generate_report(
     _fig_score_distribution(eval_losses, seed_loss, best_loss, save_dir)
 
     # ---- Save best program ----
-    _save_best_program(valid_programs, best_score)
+    if best_score is not None:
+        _save_best_program(valid_programs, best_score)
 
     logger.info("Report saved to %s/", save_dir)
 
@@ -103,42 +127,54 @@ def generate_report(
 # ---------------------------------------------------------------------------
 
 def _print_summary(
-    seed_loss: float,
-    best_loss: float,
+    seed_loss: float | None,
+    best_loss: float | None,
     n_total: int,
     n_valid: int,
-    n_failed: int,
+    n_unscored: int,
     all_losses: list[float],
 ):
-    improvement = (seed_loss - best_loss) / seed_loss * 100 if seed_loss else 0
     print()
     print("\033[1m" + "=" * 64 + "\033[0m")
     print("\033[1m  AlphaEvolve LLM Fine-Tuning -- Experiment Report\033[0m")
     print("\033[1m" + "=" * 64 + "\033[0m")
     print(f"  Task                : LoRA fine-tuning (Gemma 4 E2B)")
-    print(f"  Programs evaluated  : {n_total}")
+    print(f"  Programs returned   : {n_total}")
     print(f"  Successful          : {n_valid}")
-    print(f"  Failed              : {n_failed}")
+    print(f"  Unscored / failed   : {n_unscored}")
     print("-" * 64)
-    print(f"  Seed eval loss      : {seed_loss:.6f}")
-    print(f"  Best eval loss      : \033[32m{best_loss:.6f}\033[0m")
-    print(
-        f"  Improvement         : \033[32m{seed_loss - best_loss:.6f}  "
-        f"({improvement:.2f}%)\033[0m"
-    )
+    if seed_loss is not None:
+        print(f"  Seed eval loss      : {seed_loss:.6f}")
+    else:
+        print(f"  Seed eval loss      : not evaluated (baseline skipped)")
+    if best_loss is not None:
+        print(f"  Best eval loss      : \033[32m{best_loss:.6f}\033[0m")
+    else:
+        print(f"  Best eval loss      : n/a (no successful programs)")
+    if seed_loss is not None and best_loss is not None:
+        improvement = (seed_loss - best_loss) / seed_loss * 100 if seed_loss else 0
+        print(
+            f"  Improvement         : \033[32m{seed_loss - best_loss:.6f}  "
+            f"({improvement:.2f}%)\033[0m"
+        )
     if all_losses:
         print(f"  Median eval loss    : {np.median(all_losses):.6f}")
         print(f"  Worst eval loss     : {max(all_losses):.6f}")
     print("=" * 64)
 
     if all_losses:
-        print(f"\n  {'Rank':<6} {'Eval Loss':>12} {'vs Seed':>12}")
-        print("  " + "-" * 30)
+        show_delta = seed_loss is not None and seed_loss != 0
+        header = f"\n  {'Rank':<6} {'Eval Loss':>12}"
+        print(header + (f" {'vs Seed':>12}" if show_delta else ""))
+        print("  " + "-" * (30 if show_delta else 18))
         sorted_losses = sorted(all_losses)
         for i, loss in enumerate(sorted_losses[:10]):
-            delta = (seed_loss - loss) / seed_loss * 100 if seed_loss else 0
-            sign = "+" if delta > 0 else ""
-            print(f"  #{i+1:<5} {loss:>12.6f} {sign}{delta:>11.2f}%")
+            if show_delta:
+                delta = (seed_loss - loss) / seed_loss * 100
+                sign = "+" if delta > 0 else ""
+                print(f"  #{i+1:<5} {loss:>12.6f} {sign}{delta:>11.2f}%")
+            else:
+                print(f"  #{i+1:<5} {loss:>12.6f}")
         if len(sorted_losses) > 10:
             print(f"  ... ({len(sorted_losses) - 10} more)")
     print()
@@ -150,8 +186,8 @@ def _print_summary(
 
 def _fig_evolution_progress(
     scores: list[float],
-    seed_loss: float,
-    best_loss: float,
+    seed_loss: float | None,
+    best_loss: float | None,
     save_dir: str,
 ):
     """Step-line best-so-far neg_eval_loss over iterations."""
@@ -159,35 +195,31 @@ def _fig_evolution_progress(
     fig.patch.set_facecolor(GOOGLE_BG)
     ax.set_facecolor(GOOGLE_BG)
 
-    best_so_far: list[float] = []
+    # Plot only real (finite, non-sentinel) measurements so an un-evaluated seed
+    # or bootstrap sentinel never distorts the axis or the best-so-far line.
+    iters: list[int] = []
     individual_scores: list[float] = []
-    running = -seed_loss  # neg_eval_loss (higher is better)
-    for s in scores:
+    best_so_far: list[float] = []
+    running = -float("inf")
+    for i, s in enumerate(scores):
+        if not _is_real_score(s):
+            continue
+        iters.append(i)
         individual_scores.append(s)
-        if np.isfinite(s) and s > running:
+        if s > running:
             running = s
         best_so_far.append(running)
 
-    iters = list(range(len(best_so_far)))
+    # Seed baseline (only when the seed was actually evaluated)
+    if seed_loss is not None:
+        ax.axhline(
+            -seed_loss, color=GOOGLE_YELLOW, linestyle="--", linewidth=2,
+            label=f"Seed baseline ({-seed_loss:.4f})", zorder=2,
+        )
 
-    # Seed baseline
-    ax.axhline(
-        -seed_loss, color=GOOGLE_YELLOW, linestyle="--", linewidth=2,
-        label=f"Seed baseline ({-seed_loss:.4f})", zorder=2,
-    )
-
-    # Individual candidate scores (only finite ones within reasonable range)
-    cutoff_low = -seed_loss * 1.5 if seed_loss > 0 else -seed_loss - abs(seed_loss)
-    valid_iters = [
-        i for i, s in zip(iters, individual_scores)
-        if np.isfinite(s) and s > cutoff_low
-    ]
-    valid_vals = [
-        s for s in individual_scores
-        if np.isfinite(s) and s > cutoff_low
-    ]
+    # Individual candidate scores
     ax.scatter(
-        valid_iters, valid_vals,
+        iters, individual_scores,
         color=GOOGLE_BLUE_LIGHT, s=18, zorder=3, alpha=0.6,
         edgecolors=GOOGLE_BLUE, linewidths=0.3, label="Individual candidates",
     )
@@ -221,8 +253,8 @@ def _fig_evolution_progress(
 
 def _fig_score_distribution(
     eval_losses: list[float],
-    seed_loss: float,
-    best_loss: float,
+    seed_loss: float | None,
+    best_loss: float | None,
     save_dir: str,
 ):
     """Histogram of eval loss across all valid programs."""
@@ -236,14 +268,16 @@ def _fig_score_distribution(
         eval_losses, bins=25,
         color=GOOGLE_BLUE_LIGHT, edgecolor=GOOGLE_BLUE, alpha=0.9,
     )
-    ax.axvline(
-        seed_loss, color=GOOGLE_RED, linestyle="--",
-        linewidth=1.8, label=f"Seed ({seed_loss:.4f})",
-    )
-    ax.axvline(
-        best_loss, color=GOOGLE_GREEN, linestyle="--",
-        linewidth=1.8, label=f"Best ({best_loss:.4f})",
-    )
+    if seed_loss is not None:
+        ax.axvline(
+            seed_loss, color=GOOGLE_RED, linestyle="--",
+            linewidth=1.8, label=f"Seed ({seed_loss:.4f})",
+        )
+    if best_loss is not None:
+        ax.axvline(
+            best_loss, color=GOOGLE_GREEN, linestyle="--",
+            linewidth=1.8, label=f"Best ({best_loss:.4f})",
+        )
     ax.set_xlabel("Eval Loss", fontsize=11)
     ax.set_ylabel("Count", fontsize=11)
     ax.set_title(

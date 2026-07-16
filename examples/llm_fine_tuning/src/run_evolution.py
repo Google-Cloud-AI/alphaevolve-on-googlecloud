@@ -59,8 +59,15 @@ CONCURRENCY = int(os.getenv("CONCURRENCY", "4"))
 # single evaluation, or it will give up and cancel in-flight jobs while the
 # backend is still waiting on scores to evolve the next generation.
 IDLE_TIMEOUT_S = int(os.getenv("IDLE_TIMEOUT_S", "1800"))
+# Sentinel used to bootstrap the seed into the AlphaEvolve database when we skip
+# its (expensive) evaluation. It is intentionally the worst possible value so the
+# un-evaluated seed is never selected over a real candidate — but it is NOT a real
+# measurement, so it is never passed to the report as a baseline (doing so would
+# pollute the eval-loss statistics and plots).
+SEED_BOOTSTRAP_SCORE = -1e12
+
 # Set BASELINE_SEED=true to evaluate the seed for a real "vs seed" baseline
-# (one extra GPU eval); default uses a placeholder to skip it.
+# (one extra GPU eval); default skips it and bootstraps with SEED_BOOTSTRAP_SCORE.
 BASELINE_SEED = os.getenv("BASELINE_SEED", "false").lower() in ("1", "true", "yes")
 
 
@@ -118,8 +125,10 @@ def main():
 
     logger.info("Experiment created: %s", experiment.experiment_name)
 
-    # Baseline the seed for a real "vs seed" comparison (one GPU eval), or use a
-    # placeholder to skip it (saves 5-10 min of GPU).
+    # Baseline the seed for a real "vs seed" comparison (one GPU eval), or skip it
+    # to save 5-10 min of GPU. When skipped, `seed_baseline` stays None so the
+    # report never treats the bootstrap sentinel as a real measurement.
+    seed_baseline = None
     if BASELINE_SEED:
         logger.info("Baselining the seed program (one remote GPU eval)...")
         seed_eval = evaluation_function(
@@ -127,23 +136,32 @@ def main():
                 {"path": "program.py", "content": INITIAL_PROGRAM_CODE}]}}
         )
         if METRIC_NAME in seed_eval:
-            seed_score = float(seed_eval[METRIC_NAME])
+            seed_baseline = float(seed_eval[METRIC_NAME])
         else:
-            seed_score = next(
+            seed_baseline = next(
                 (s["score"] for s in seed_eval.get("scores", {}).get("scores", [])
                  if s.get("metric") == METRIC_NAME),
-                -1e12,
+                None,
             )
-        logger.info("Seed %s = %.4f", METRIC_NAME, seed_score)
-    else:
-        seed_score = -1e12  # placeholder (skips the seed's GPU eval)
+        if seed_baseline is None:
+            logger.warning(
+                "Seed evaluation returned no '%s' score; continuing without a "
+                "seed baseline.", METRIC_NAME
+            )
+        else:
+            logger.info("Seed %s = %.4f", METRIC_NAME, seed_baseline)
 
+    # The initial program still needs a score to bootstrap the experiment: use the
+    # real baseline when we have one, otherwise the (non-reported) sentinel.
+    bootstrap_score = (
+        seed_baseline if seed_baseline is not None else SEED_BOOTSTRAP_SCORE
+    )
     initial_program = {
         "content": {
             "files": [{"path": "program.py", "content": INITIAL_PROGRAM_CODE}]
         },
         "evaluation": {
-            "scores": {"scores": [{"metric": METRIC_NAME, "score": seed_score}]}
+            "scores": {"scores": [{"metric": METRIC_NAME, "score": bootstrap_score}]}
         },
     }
 
@@ -171,7 +189,7 @@ def main():
         logger.warning("No programs returned.")
         return
 
-    generate_report(programs, seed_score)
+    generate_report(programs, seed_baseline)
 
 
 if __name__ == "__main__":
