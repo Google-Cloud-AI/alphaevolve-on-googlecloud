@@ -131,8 +131,8 @@ run pytest` passes.
 **Transition:** After the gate is satisfied, **proceed to Phase 2 immediately.**
 
 Do NOT ask "How would you like to proceed?", "Should I launch?", or "Should I
-create a CL?". Do NOT offer the user a menu of options. Do NOT stop and wait for
-a new prompt. The user asked you to optimize their code — launching the
+create a commit?". Do NOT offer the user a menu of options. Do NOT stop and wait
+for a new prompt. The user asked you to optimize their code — launching the
 experiment is the obvious and only next step.
 
 Simply inform the user and continue:

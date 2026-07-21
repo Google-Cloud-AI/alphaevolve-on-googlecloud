@@ -1,0 +1,33 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ae-cli"
+# Version is single-sourced from ae_cli/version.py (see [tool.hatch.version]).
+dynamic = ["version"]
+description = "CLI for the AlphaEvolve Cloud API."
+# 3.11.4 is the first release with tarfile's `filter=` extraction guard, used by
+# `ae skills install`.
+requires-python = ">=3.11.4"
+dependencies = [
+    "typer>=0.9",
+    "rich>=13.0",
+    "requests>=2.28",
+    "google-auth>=2.0",
+    "coolname>=2.0",
+    "filelock>=3.0",
+    "immutabledict>=2.0",
+    "Markdown>=3.4",
+    "matplotlib>=3.5",
+    "Pygments>=2.14",
+]
+
+[project.scripts]
+ae = "ae_cli.cli:app"
+
+[tool.hatch.version]
+path = "ae_cli/version.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["ae_cli"]

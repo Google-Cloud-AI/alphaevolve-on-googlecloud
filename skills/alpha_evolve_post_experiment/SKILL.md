@@ -769,7 +769,7 @@ If scores diverge significantly:
 **Step 4.5c: Run existing tests (if available)**
 
 If the original source file has associated tests (e.g., `test_<filename>.py` in
-the same directory, or tests referenced in BUILD/pyproject.toml):
+the same directory, or tests referenced in pyproject.toml):
 
 ```bash
 # For uv-managed projects:

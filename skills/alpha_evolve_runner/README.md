@@ -37,12 +37,11 @@ Handles:
 ## Skill Structure
 
 ```
-experiment_runner/
-  OWNERS
+alpha_evolve_runner/
   README.md
-  skills/alpha_evolve_runner/
-    SKILL.md              # Main skill instructions
-    references/
-      cli_reference.md    # ae CLI command reference
-      debugging.md        # Troubleshooting guide
+  SKILL.md              # Main skill instructions
+  references/
+    cli_reference.md    # ae CLI command reference
+    debugging.md        # Troubleshooting guide
+    models.md           # Generation model reference
 ```

@@ -16,27 +16,27 @@ There are 6 AlphaEvolve skills included, with README.md and SKILLS.md files prov
 
 Important limitations of this version:
 
-* **Python Only:** the skill currently only supports evolving Python code.  
-  * **Note:** the AlphaEvolve skills were tested with Python version 3.13.7 and above.  
-* **Single Code Location Only:** so far, we tested the skill only to evolve one code location at a time. Context from multiple files can be included, but we did not test simultaneously optimizing multiple evolve blocks yet.  
+* **Python Only:** the skill currently only supports evolving Python code.
+  * **Note:** the AlphaEvolve skills were tested with Python version 3.13.7 and above.
+* **Single Code Location Only:** so far, we tested the skill only to evolve one code location at a time. Context from multiple files can be included, but we did not test simultaneously optimizing multiple evolve blocks yet.
 * **Operating System:** The skill works on Linux, macOS, and Windows.
 
 ## Prerequisites
 
-1. The Google Cloud CLI (gcloud) is a pre-requisite for this Getting Started guide. Please install the Google Cloud CLI using the official [installation instructions](https://docs.cloud.google.com/sdk/docs/install-sdk%20).  This will be required for authentication.  
+1. The Google Cloud CLI (gcloud) is a pre-requisite for this Getting Started guide. Please install the Google Cloud CLI using the official [installation instructions](https://docs.cloud.google.com/sdk/docs/install-sdk).  This will be required for authentication.
    * You can confirm proper installation of the Google Cloud CLI by executing the following command:
 
 ```shell
 gcloud --version
 ```
 
-2. Before getting started with the AlphaEvolve Skill, you’ll need to authenticate by running this command in a shell:
+2. Before getting started with the AlphaEvolve Skill, you'll need to authenticate by running this command in a shell:
 
 ```shell
 gcloud auth application-default login
 ```
 
-3. Uv (uv)  is also required to assist with package management. Install uv by using the official [installation instructions](https://docs.astral.sh/uv/#installation%20) . You can confirm a successful installation by running the following command:
+3. Uv (uv)  is also required to assist with package management. Install uv by using the official [installation instructions](https://docs.astral.sh/uv/#installation) . You can confirm a successful installation by running the following command:
 
 ```shell
 uv --version
@@ -46,16 +46,25 @@ uv --version
 
 ## Setup
 
-The AlphaEvolve skills are provided through the AlphaEvolve repo. 
+Setup has two steps: install the `ae` CLI (required by the skills), then install the skills into your coding assistant. Both pull directly from the AlphaEvolve repo, so **cloning is optional** — a local clone is only needed if you want to install the skills from an offline source (see step 2).
 
-1. To begin, clone the repo to get access to the skills assets. Included in the artifacts is a folder named ‘skills’. This folder contains the following:  
-* Setup script  
-* 6 AlphaEvolve skills (each with a README.md, SKILL.md, and references)  
-2. The setup installs the skill and the `ae` CLI, which is required by the skill.  
+1. Install the `ae` CLI from source. Since `uv` is already a prerequisite, install it straight from the repo without cloning:
 
 ```shell
-uv run setup_ae.py
+uv tool install "git+https://github.com/Google-Cloud-AI/alphaevolve-on-googlecloud.git#subdirectory=skills"
 ```
+
+   * `uv` is recommended — it's already a prerequisite and installs `ae` in isolation on your PATH; `pipx` does the same, and plain `pip` works inside an active virtualenv.
+   * `#subdirectory=skills` installs the `ae` CLI **only**; the 6 AlphaEvolve skills are installed separately in step 2.
+
+2. Install the skills into your coding assistant:
+
+```shell
+ae skills install
+```
+
+   * With no arguments, this auto-detects a local checkout (a directory holding the six `alpha_evolve_*` dirs, or a repo root with a `skills/` subdirectory), and otherwise fetches the skills from the GitHub repo (`Google-Cloud-AI/alphaevolve-on-googlecloud`, ref `main`).
+   * It then shows a menu to choose the destination coding assistant (Gemini CLI, Antigravity, Claude Code, or OpenAI Codex) or a custom path.
 
 **Tip:** You can verify the installation of the `ae` CLI by running:
 
@@ -74,26 +83,25 @@ ae version
 List all skills that are readily available without using another tool or skill
 ```
 
-2. Confirm the following 6 AlphaEvolve skills are returned:   
-   1. alpha\_evolve\_consultant  
-   2. alpha\_evolve\_experiment\_design  
-   3. alpha\_evolve\_monitor  
-   4. alpha\_evolve\_orchestrator  
-   5. alpha\_evolve\_post\_experiment  
-   6. alpha\_evolve\_runner  
-3. Review the individual README.md and SKILL.md files for each skill to learn about what each one does.  
-4. Now you’re ready to leverage the AlphaEvolve skills for the end-to-end implementation of AlphaEvolve.   
-   1. We recommend using Gemini 3.5 Flash for the coding assistant.   
-      
+2. Confirm the following 6 AlphaEvolve skills are returned: 
+   1. alpha_evolve_consultant
+   2. alpha_evolve_experiment_design
+   3. alpha_evolve_monitor
+   4. alpha_evolve_orchestrator
+   5. alpha_evolve_post_experiment
+   6. alpha_evolve_runner
+3. Review the individual README.md and SKILL.md files for each skill to learn about what each one does.
+4. Now you're ready to leverage the AlphaEvolve skills for the end-to-end implementation of AlphaEvolve. 
+   1. We recommend using Gemini 3.5 Flash for the coding assistant. 
 
-Now it’s time to get started with executing your first experiment with AlphaEvolve\!
+Now it's time to get started with executing your first experiment with AlphaEvolve!
 
-1. Open an example algorithm. For the purposes of this Getting Started Guide, we’ll leverage the following code:  
-   1. As you can see, the code already contains EVOLVE-BLOCK-START / EVOLVE-BLOCK-END comments to indicate which parts of the code should be evolved. The code also contains an evaluation function.  
-   2. **Note**:  When you know what code you want to optimize and how to evaluate it: add these elements manually to your code before you start.  
-      1. Otherwise: let the coding assistant help with this. For example, you can submit the following prompt(s) to your coding assistant:   
-         1. “Prepare the currently opened file for optimization with AlphaEvolve” or   
-         2. “Help me find locations in my code that could be optimized with AlphaEvolve”.
+1. Open an example algorithm. For the purposes of this Getting Started Guide, we'll leverage the following code:
+   1. As you can see, the code already contains EVOLVE-BLOCK-START / EVOLVE-BLOCK-END comments to indicate which parts of the code should be evolved. The code also contains an evaluation function.
+   2. **Note**:  When you know what code you want to optimize and how to evaluate it: add these elements manually to your code before you start.
+      1. Otherwise: let the coding assistant help with this. For example, you can submit the following prompt(s) to your coding assistant: 
+         1. "Prepare the currently opened file for optimization with AlphaEvolve" or 
+         2. "Help me find locations in my code that could be optimized with AlphaEvolve".
 
 ```py
 """Initial program for the circle packing problem.
@@ -199,23 +207,22 @@ if __name__ == "__main__":
   scores = evaluate({"n": 26})
   for metric, value in scores.items():
     print(f"{metric}: {value}")
-
 ```
 
-2. Prompt your coding assistant to optimize your code with AlphaEvolve. For example, you could instruct your agent with:  
-   1. "Use alpha\_evolve to optimize the code of this model to make it faster."  
-   2. "Set up an AlphaEvolve experiment to find a better algorithm for this scheduling function."  
-   3. "Evolve this loss function to improve convergence on this XYZ benchmark."  
-   4. **Note**: In our experience, the skill works best when you provide a markdown file that explicitly defines the problem, outlines the objective, and gives relevant background information (e.g. constraints, evaluation criteria, or known baselines).  
+2. Prompt your coding assistant to optimize your code with AlphaEvolve. For example, you could instruct your agent with:
+   1. "Use alpha_evolve to optimize the code of this model to make it faster."
+   2. "Set up an AlphaEvolve experiment to find a better algorithm for this scheduling function."
+   3. "Evolve this loss function to improve convergence on this XYZ benchmark."
+   4. **Note**: In our experience, the skill works best when you provide a markdown file that explicitly defines the problem, outlines the objective, and gives relevant background information (e.g. constraints, evaluation criteria, or known baselines).
 
 3. The assistant will then guide you through the process.
 
-4. When everything is set up, the assistant will ask for your confirmation to start the experiment. It will then run the local evaluation loop in the background and periodically update you on its progress.  
-     
-5. When the experiment is completed, the assistant will provide a summary and help you integrate the best performing program into your original code.   
-   1. In our example, the initial sum\_of\_radii score of 0.941 was improved by \+169.9% to 2.541:
+4. When everything is set up, the assistant will ask for your confirmation to start the experiment. It will then run the local evaluation loop in the background and periodically update you on its progress.
 
-This completes the AlphaEvolve Skills Getting Started Guide\! Please provide any and all feedback on AlphaEvolve and AlphaEvolve skill usage to your Google Cloud Account Team.
+5. When the experiment is completed, the assistant will provide a summary and help you integrate the best performing program into your original code. 
+   1. In our example, the initial sum_of_radii score of 0.941 was improved by +169.9% to 2.541:
+
+This completes the AlphaEvolve Skills Getting Started Guide! Please provide any and all feedback on AlphaEvolve and AlphaEvolve skill usage to your Google Cloud Account Team.
 
 ### Example Prompts
 
@@ -235,8 +242,8 @@ This completes the AlphaEvolve Skills Getting Started Guide\! Please provide any
 
 ### Tips / Best Practices
 
-* **When you already know what code you want to optimize and how to evaluate it**: add these elements manually to your code before you start.  
-  * **Otherwise**: let the coding assistant help with this, for example: “prepare the currently opened file for optimization with AlphaEvolve” or “help me find locations in my code that could be optimized with AlphaEvolve”.
+* **When you already know what code you want to optimize and how to evaluate it**: add these elements manually to your code before you start.
+  * **Otherwise**: let the coding assistant help with this, for example: "prepare the currently opened file for optimization with AlphaEvolve" or "help me find locations in my code that could be optimized with AlphaEvolve".
 
 ## Appendix
 
@@ -246,14 +253,14 @@ This completes the AlphaEvolve Skills Getting Started Guide\! Please provide any
 
 Podman (`podman`) can optionally be used to run AlphaEvolve experiments in a rootless sandbox to avoid side effects on the system. Note: Podman is optional. The AlphaEvolve skill works fine without Podman. 
 
-1. Install Podman using the official Podman installation documentation [https://podman.io/docs/installation](https://podman.io/docs/installation)   
+1. Install Podman using the official Podman installation documentation [https://podman.io/docs/installation](https://podman.io/docs/installation)
 2. Confirm installation by running the following command:
 
 ```shell
 podman --version
 ```
 
-3. Use the following command to configure the infrastructure resources needed for Podman. These commands allocate a dedicated block of unprivileged system IDs to your account, which is required by Podman to manage its internal files and users.   
+3. Use the following command to configure the infrastructure resources needed for Podman. These commands allocate a dedicated block of unprivileged system IDs to your account, which is required by Podman to manage its internal files and users.
    1. Note that if multiple users want to use the skill on the same system, they need to use different system ID ranges (e.g. 200000-265535).
 
 ```shell

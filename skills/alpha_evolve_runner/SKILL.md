@@ -199,8 +199,8 @@ ae config --name=<active_profile> --models=<model_spec>
 -   `--collection=default_collection` (configurable if project uses a custom
     collection)
 -   `--models=gemini-3.5-flash` (recommended default; available in all regions)
--   `--base-url=https://discoveryengine.googleapis.com` (prod, change only for
-    internal dev/staging)
+-   `--base-url=https://discoveryengine.googleapis.com` (prod default; only
+    change if directed to a different endpoint)
 
 **Available models:** Read `references/models.md` for the full list of model IDs
 and descriptions. You **MUST** consult that reference before selecting a model.

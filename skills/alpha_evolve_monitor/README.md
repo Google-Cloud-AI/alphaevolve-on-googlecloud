@@ -40,12 +40,11 @@ This is one of three AlphaEvolve skills:
 ## Skill Structure
 
 ```
-experiment_monitor/
-  OWNERS
+alpha_evolve_monitor/
   README.md
-  skills/experiment_monitor/
-    SKILL.md              # Main skill instructions
-    references/
-      cli_reference.md    # ae CLI command reference for monitoring
-      debugging.md        # Troubleshooting guide
+  SKILL.md              # Main skill instructions
+  references/
+    cli_reference.md    # ae CLI command reference for monitoring
+    debugging.md        # Troubleshooting guide
+    models.md           # Generation model reference
 ```

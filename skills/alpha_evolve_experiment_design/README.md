@@ -76,7 +76,6 @@ implementation and verifying at each step.
 alpha_evolve_experiment_design/
   README.md
   SKILL.md                  # Main skill instructions (Phase selection)
-  DESCRIPTION.md            # Skill triggers and capabilities
   resources/
     experiment_description_schema.py  # Pydantic schema for Phase 1
   references/
@@ -84,6 +83,8 @@ alpha_evolve_experiment_design/
     phase_2_implement.md    # Instructions for Implement phase
     evolve_block_guide.md   # Rules for EVOLVE-BLOCKs
     evaluator_patterns.md   # Patterns for sandboxing and timeouts
+    multi_file_guide.md     # Multi-file experiment design
+    numerical_stability.md  # Numerical-stability guidance
   examples/
     circle_packing/         # Reference implementation
 ```

@@ -45,11 +45,9 @@ Users can enter the workflow at any phase:
 ## Skill Structure
 
 ```
-experiment_orchestrator/
-  OWNERS
+alpha_evolve_orchestrator/
   README.md
-  skills/alpha_evolve_orchestrator/
-    SKILL.md                    # Main orchestrator instructions
-    references/
-      handoff_contracts.md      # Data contracts between phases
+  SKILL.md                  # Main orchestrator instructions
+  references/
+    handoff_contracts.md    # Data contracts between phases
 ```
