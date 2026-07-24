@@ -27,7 +27,7 @@ Do not use AlphaEvolve for:
 - **Convex optimization problems.** Standard solvers (scipy.optimize, CVXPY, Gurobi) will find the global optimum faster and with guarantees.
 - **Needle-in-a-haystack problems.** If there is only one valid solution in the entire program space (e.g., prime factorization), evolutionary search is the wrong paradigm.
 - **Over-constrained problems** where the space of valid solutions is extremely sparse. AE will spend most of its budget generating invalid programs.
-- **Problems solvable by hyperparameter tuning.** If the search space is a small grid of parameters, use GridSearchCV or Optuna.
+- **Simple hyperparameter tuning.** When a small, low-dimensional parameter grid is enough — one a grid search or standard HPO (GridSearchCV, Optuna) can cover — use those; they're faster, and grid search is exhaustive. This applies *only* to simple cases: **non-trivial** hyperparameter or configuration optimization — high-dimensional, non-convex, or combinatorial spaces where grid search is infeasible and the landscape has many local optima — is a strong fit for AlphaEvolve.
 - **Code generation from scratch.** AE evolves existing code; it does not write programs from a blank slate.
 
 ### 1.3 AlphaEvolve vs. Other Approaches
