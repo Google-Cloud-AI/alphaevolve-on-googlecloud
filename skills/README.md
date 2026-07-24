@@ -57,6 +57,13 @@ uv tool install "git+https://github.com/Google-Cloud-AI/alphaevolve-on-googleclo
    * `uv` is recommended — it's already a prerequisite and installs `ae` in isolation on your PATH; `pipx` does the same, and plain `pip` works inside an active virtualenv.
    * `#subdirectory=skills` installs the `ae` CLI **only**; the 6 AlphaEvolve skills are installed separately in step 2.
 
+**Tip:** You can verify the installation of the `ae` CLI by running:
+
+```shell
+# Note: do not use --version
+ae version
+```
+
 2. Install the skills into your coding assistant:
 
 ```shell
@@ -65,13 +72,6 @@ ae skills install
 
    * With no arguments, this auto-detects a local checkout (a directory holding the six `alpha_evolve_*` dirs, or a repo root with a `skills/` subdirectory), and otherwise fetches the skills from the GitHub repo (`Google-Cloud-AI/alphaevolve-on-googlecloud`, ref `main`).
    * It then shows a menu to choose the destination coding assistant (Gemini CLI, Antigravity, Claude Code, or OpenAI Codex) or a custom path.
-
-**Tip:** You can verify the installation of the `ae` CLI by running:
-
-```shell
-# Note: do not use --version
-ae version
-```
 
 ## Usage
 
