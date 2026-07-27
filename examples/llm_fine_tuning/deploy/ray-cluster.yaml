@@ -31,7 +31,6 @@ spec:
   headGroupSpec:
     rayStartParams:
       dashboard-host: "0.0.0.0"
-      no-monitor: ""
     template:
       metadata:
         annotations:
