@@ -32,12 +32,17 @@ from dotenv import load_dotenv
 # Load .env from the example directory, then fall back to repo root
 _example_env = os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env")
 load_dotenv(_example_env)
-load_dotenv()  # repo-root .env as fallback
+load_dotenv()
 
 from alpha_evolve.client import AlphaEvolveClient
 from alpha_evolve.controller import run_controller_loop
 from alpha_evolve.experiment import AlphaEvolveExperiment
-from .evaluate import INITIAL_PROGRAM_CODE, METRIC_NAME, evaluation_function
+from .evaluate import (
+    INITIAL_PROGRAM_CODE,
+    METRIC_NAME,
+    SEED_BOOTSTRAP_SCORE,
+    evaluation_function,
+)
 from .utils.report import generate_report
 
 logger = logging.getLogger(__name__)
@@ -59,8 +64,10 @@ CONCURRENCY = int(os.getenv("CONCURRENCY", "4"))
 # single evaluation, or it will give up and cancel in-flight jobs while the
 # backend is still waiting on scores to evolve the next generation.
 IDLE_TIMEOUT_S = int(os.getenv("IDLE_TIMEOUT_S", "1800"))
-# Set BASELINE_SEED=true to evaluate the seed for a real "vs seed" baseline
-# (one extra GPU eval); default uses a placeholder to skip it.
+
+# SEED_EVAL_LOSS: known eval loss of the seed config, for a "vs seed" report with no extra eval.
+SEED_EVAL_LOSS = os.getenv("SEED_EVAL_LOSS")
+# BASELINE_SEED=true runs one seed eval for a real "vs seed" baseline (default: skip).
 BASELINE_SEED = os.getenv("BASELINE_SEED", "false").lower() in ("1", "true", "yes")
 
 
@@ -118,32 +125,46 @@ def main():
 
     logger.info("Experiment created: %s", experiment.experiment_name)
 
-    # Baseline the seed for a real "vs seed" comparison (one GPU eval), or use a
-    # placeholder to skip it (saves 5-10 min of GPU).
-    if BASELINE_SEED:
+    # Seed baseline for the report: a known eval loss if provided, else one seed
+    # eval if BASELINE_SEED, else skipped.
+    seed_baseline = None
+    if SEED_EVAL_LOSS is not None:
+        try:
+            seed_baseline = -float(SEED_EVAL_LOSS)
+            logger.info("Using provided seed baseline: %s = %.4f", METRIC_NAME, seed_baseline)
+        except ValueError:
+            logger.warning("Invalid SEED_EVAL_LOSS=%r; ignoring.", SEED_EVAL_LOSS)
+    if seed_baseline is None and BASELINE_SEED:
         logger.info("Baselining the seed program (one remote GPU eval)...")
         seed_eval = evaluation_function(
             {"name": "seed", "content": {"files": [
                 {"path": "program.py", "content": INITIAL_PROGRAM_CODE}]}}
         )
         if METRIC_NAME in seed_eval:
-            seed_score = float(seed_eval[METRIC_NAME])
+            seed_baseline = float(seed_eval[METRIC_NAME])
         else:
-            seed_score = next(
+            seed_baseline = next(
                 (s["score"] for s in seed_eval.get("scores", {}).get("scores", [])
                  if s.get("metric") == METRIC_NAME),
-                -1e12,
+                None,
             )
-        logger.info("Seed %s = %.4f", METRIC_NAME, seed_score)
-    else:
-        seed_score = -1e12  # placeholder (skips the seed's GPU eval)
+        if seed_baseline is None:
+            logger.warning(
+                "Seed evaluation returned no '%s' score; continuing without a "
+                "seed baseline.", METRIC_NAME
+            )
+        else:
+            logger.info("Seed %s = %.4f", METRIC_NAME, seed_baseline)
 
+    bootstrap_score = (
+        seed_baseline if seed_baseline is not None else SEED_BOOTSTRAP_SCORE
+    )
     initial_program = {
         "content": {
             "files": [{"path": "program.py", "content": INITIAL_PROGRAM_CODE}]
         },
         "evaluation": {
-            "scores": {"scores": [{"metric": METRIC_NAME, "score": seed_score}]}
+            "scores": {"scores": [{"metric": METRIC_NAME, "score": bootstrap_score}]}
         },
     }
 
@@ -171,7 +192,7 @@ def main():
         logger.warning("No programs returned.")
         return
 
-    generate_report(programs, seed_score)
+    generate_report(programs, seed_baseline)
 
 
 if __name__ == "__main__":
