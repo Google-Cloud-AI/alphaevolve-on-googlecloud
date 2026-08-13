@@ -24,6 +24,8 @@ import os
 import numpy as np
 from typing import Any, Mapping
 
+from alpha_evolve import scoring
+
 logger = logging.getLogger(__name__)
 
 METRIC_NAME = "neg_tour_length"
@@ -53,7 +55,9 @@ def tsp_evaluation_function(program_candidate: dict) -> dict:
         Evaluation dict with ``scores`` and optional ``insights``.
     """
     code = program_candidate["content"]["files"][0]["content"]
-    score_value = None
+    # A candidate that fails to run, or produces no usable tour, is at fault: score it with a
+    # finite penalty rather than leaving it unscored.
+    score_value = scoring.hard_penalty()
     insights_list = []
 
     try:
@@ -78,7 +82,7 @@ def tsp_evaluation_function(program_candidate: dict) -> dict:
             neg_tour_length = result.get(METRIC_NAME)
 
             if neg_tour_length is not None and np.isfinite(neg_tour_length):
-                score_value = float(neg_tour_length)
+                score_value = scoring.finite_score(float(neg_tour_length), METRIC_NAME)
             else:
                 insights_list.append({
                     "label": "Invalid Score",

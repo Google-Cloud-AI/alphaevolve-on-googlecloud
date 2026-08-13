@@ -27,6 +27,8 @@ import urllib.request
 
 from dotenv import load_dotenv
 
+from alpha_evolve import scoring
+
 # Load .env from the example directory, then fall back to repo root
 _example_env = os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env")
 load_dotenv(_example_env)
@@ -35,7 +37,10 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 METRIC_NAME = "neg_eval_loss"
-SEED_BOOTSTRAP_SCORE = -1e12
+
+# Floor used when no seed baseline is available, and the threshold `utils/report.py` uses to
+# tell a real score from a placeholder. Tied to the scoring contract so the two cannot drift.
+SEED_BOOTSTRAP_SCORE = scoring.HARD_PENALTY
 
 EVALUATOR_URL = os.getenv("EVALUATOR_URL")
 if not EVALUATOR_URL:
@@ -117,8 +122,16 @@ def evaluation_function(program_candidate: dict) -> dict:
                 scores = []
                 for k, v in metrics.items():
                     try:
-                        scores.append({"metric": k, "score": float(v) if v is not None else 0.0})
+                        score = (
+                            scoring.finite_score(float(v), k)
+                            if v is not None
+                            else scoring.hard_penalty()
+                        )
+                        scores.append({"metric": k, "score": score})
                     except (TypeError, ValueError):
+                        # Non-numeric metrics (e.g. the merged_model_gcs path) keep their
+                        # historical 0.0. The value is identical for every candidate that
+                        # reaches it, so it cannot influence ranking.
                         scores.append({"metric": k, "score": 0.0})
 
                 return {
@@ -131,8 +144,13 @@ def evaluation_function(program_candidate: dict) -> dict:
             flat_metrics = {}
             for k, v in metrics.items():
                 try:
-                    flat_metrics[k] = float(v) if v is not None else 0.0
+                    flat_metrics[k] = (
+                        scoring.finite_score(float(v), k)
+                        if v is not None
+                        else scoring.hard_penalty()
+                    )
                 except (TypeError, ValueError):
+                    # See the note above: non-numeric metrics keep their historical 0.0.
                     flat_metrics[k] = 0.0
 
             return flat_metrics

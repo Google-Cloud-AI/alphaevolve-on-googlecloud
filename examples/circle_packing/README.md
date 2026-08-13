@@ -36,7 +36,10 @@ flowchart TB
 |--------|-------------|
 | `sum_of_radii` | **Primary.** Sum of all circle radii. Higher is better. |
 
-Constraint violations (overlap, out-of-bounds) return `-inf`.
+The seed program returns `-inf` for a constraint violation (overlap, out-of-bounds). The
+evaluator converts that — along with a crash, a missing `evaluate()`, or any non-finite result
+— into a finite `-1e9` penalty before submitting. See the
+[scoring convention](../../README.md#scoring-convention).
 
 ## Prerequisites
 
