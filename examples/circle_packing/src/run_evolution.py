@@ -25,6 +25,7 @@ load_dotenv()
 from alpha_evolve.client import AlphaEvolveClient
 from alpha_evolve.controller import run_controller_loop
 from alpha_evolve.experiment import AlphaEvolveExperiment
+from alpha_evolve import scoring
 from alpha_evolve.visualization import get_score
 
 from .evaluate import (
@@ -122,7 +123,12 @@ def main():
         },
         "evaluation": {
             "scores": {
-                "scores": [{"metric": CIRCLE_PACKING_EVALUATION_METRIC, "score": -1e12}]
+                "scores": [
+                    {
+                        "metric": CIRCLE_PACKING_EVALUATION_METRIC,
+                        "score": scoring.hard_penalty(),
+                    }
+                ]
             }
         },
     }
@@ -152,7 +158,10 @@ def main():
 
         for i, prog in enumerate(top_programs):
             score_val = get_score(prog, CIRCLE_PACKING_EVALUATION_METRIC)
-            if score_val == -float("inf"):
+            # get_score returns -inf when the metric is absent, and the evaluator returns a
+            # hard penalty when the candidate failed. Both mean "nothing worth visualizing",
+            # and re-running a failed candidate's construct_packing here is wasted work.
+            if score_val <= scoring.HARD_PENALTY:
                 print(
                     f"\nSkipping program with no valid score: {prog.get('name', 'Unknown ID')}"
                 )

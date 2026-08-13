@@ -20,7 +20,18 @@ import os
 import matplotlib.pyplot as plt
 import numpy as np
 
+from alpha_evolve import scoring
 from alpha_evolve.visualization import get_score
+
+
+def _is_real_score(score: float) -> bool:
+    """Return True when a score came from a candidate that actually produced a tour.
+
+    A failed candidate is scored with a finite hard penalty, so `np.isfinite()` alone does not
+    exclude it — a penalty would otherwise enter the report as a tour of length 1e9 and flatten
+    every plot. `get_score` returns -inf when the metric is absent, which this also rejects.
+    """
+    return score > scoring.HARD_PENALTY
 
 from ..evaluate import INITIAL_PROGRAM_CODE, METRIC_NAME
 from ..program import (
@@ -79,8 +90,8 @@ def generate_report(
 
     # Sort by score (best first) for "best program" selection
     scores = [get_score(p, METRIC_NAME) for p in programs]
-    valid_programs = [p for p, s in zip(programs, scores) if np.isfinite(s)]
-    tour_lengths = [-s for s in scores if np.isfinite(s)]
+    valid_programs = [p for p, s in zip(programs, scores) if _is_real_score(s)]
+    tour_lengths = [-s for s in scores if _is_real_score(s)]
 
     best_score = max(scores) if scores else seed_score
     best_length = -best_score
@@ -203,7 +214,7 @@ def _fig_evolution_progress(
     individual_lengths: list[float] = []
     running = seed_length
     for s in scores:
-        tl = -s if np.isfinite(s) else np.inf
+        tl = -s if _is_real_score(s) else np.inf
         individual_lengths.append(tl)
         if tl < running:
             running = tl

@@ -189,14 +189,30 @@ SAMPLE_PROGRAM_CANDIDATE = {
 _exec_globals = {"np": np, "Any": Any, "Mapping": Mapping}
 _exec_locals = _exec_globals # Use same dict for globals and locals
 exec(SAMPLE_PROGRAM_CODE, _exec_globals, _exec_locals)
-_evaluate_func = _exec_locals.get("evaluate")
+_evaluate_func = _exec_locals["evaluate"]
 _raw_score_from_sample_program = _evaluate_func(CIRCLE_PACKING_EVALUATION_INPUTS)[CIRCLE_PACKING_EVALUATION_METRIC]
 
-# Apply the same conversion logic as circle_packing_evaluation does
-if _raw_score_from_sample_program == -np.inf:
-    EXPECTED_SCORE_FOR_SAMPLE_PROGRAM = None
-else:
-    EXPECTED_SCORE_FOR_SAMPLE_PROGRAM = _raw_score_from_sample_program
+# The sample program's packing is infeasible, so its evaluate() returns -inf. The evaluator
+# converts that to a failure sentinel rather than passing it through.
+SAMPLE_PROGRAM_IS_FEASIBLE = _raw_score_from_sample_program != -np.inf
+
+# Any score at or below this is unambiguously a failure sentinel: a feasible n=26 packing sums
+# to roughly 2.6, so no real result comes close. Asserting a threshold rather than the exact
+# constant keeps these tests valid if the sentinel value is retuned.
+FAILURE_SCORE_CEILING = -1e6
+
+
+def assert_is_failure_score(score):
+    """Assert a score marks a failed candidate under the evaluator's scoring contract.
+
+    A failure must be a finite negative sentinel. It must not be None (which means "unscored"),
+    must not be +/-inf or NaN (not valid JSON, and inf would outrank every real score), and
+    must not be 0.0 (which outranks every real score whenever good values are negative).
+    """
+    assert score is not None, "a failed candidate must still be scored, not left unscored"
+    assert isinstance(score, float)
+    assert np.isfinite(score), f"failure score must be finite, got {score}"
+    assert score <= FAILURE_SCORE_CEILING, f"expected a failure sentinel, got {score}"
 
 
 def test_circle_packing_evaluation_valid_program():
@@ -208,12 +224,12 @@ def test_circle_packing_evaluation_valid_program():
     score_item = result["scores"]["scores"][0]
     assert score_item["metric"] == CIRCLE_PACKING_EVALUATION_METRIC
     
-    if EXPECTED_SCORE_FOR_SAMPLE_PROGRAM is not None:
-        assert score_item["score"] == pytest.approx(EXPECTED_SCORE_FOR_SAMPLE_PROGRAM)
+    if SAMPLE_PROGRAM_IS_FEASIBLE:
+        assert score_item["score"] == pytest.approx(_raw_score_from_sample_program)
         assert isinstance(score_item["score"], float)
         assert not np.isinf(score_item["score"])
     else:
-        assert score_item["score"] is None
+        assert_is_failure_score(score_item["score"])
 
 
 def test_circle_packing_evaluation_missing_evaluate_func():
@@ -230,7 +246,7 @@ def test_circle_packing_evaluation_missing_evaluate_func():
         }
     }
     result = circle_packing_evaluation(invalid_program_candidate)
-    assert result["scores"]["scores"][0]["score"] is None
+    assert_is_failure_score(result["scores"]["scores"][0]["score"])
     assert "insights" in result
     assert result["insights"]["insights"][0]["label"] == "Invalid Program Structure"
     assert "The program is missing a callable 'evaluate' function" in result["insights"]["insights"][0]["text"]
@@ -250,7 +266,7 @@ def test_circle_packing_evaluation_code_raises_exception():
         }
     }
     result = circle_packing_evaluation(error_program_candidate)
-    assert result["scores"]["scores"][0]["score"] is None
+    assert_is_failure_score(result["scores"]["scores"][0]["score"])
     assert "insights" in result
     assert result["insights"]["insights"][0]["label"] == "Runtime Error"
     assert "The program failed during execution with the following error: Test error" in result["insights"]["insights"][0]["text"]
@@ -269,7 +285,7 @@ def test_circle_packing_evaluation_invalid_score():
         }
     }
     result = circle_packing_evaluation(invalid_score_candidate)
-    assert result["scores"]["scores"][0]["score"] is None
+    assert_is_failure_score(result["scores"]["scores"][0]["score"])
     assert "insights" in result
     assert result["insights"]["insights"][0]["label"] == "Invalid Score"
     assert "The evaluation function returned an invalid score" in result["insights"]["insights"][0]["text"]
