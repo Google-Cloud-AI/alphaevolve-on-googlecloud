@@ -122,7 +122,7 @@ def main():
         },
         "evaluation": {
             "scores": {
-                "scores": [{"metric": CIRCLE_PACKING_EVALUATION_METRIC, "score": -1e12}]
+                "scores": [{"metric": CIRCLE_PACKING_EVALUATION_METRIC, "score": 0.0}]
             }
         },
     }

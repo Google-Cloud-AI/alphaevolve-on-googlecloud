@@ -151,8 +151,9 @@ class TestCLIInterface:
     tmpdir = tempfile.mkdtemp()
     try:
       prog_dst = os.path.join(tmpdir, "initial_program.py")
-      shutil.copy("initial_program.py", prog_dst)
-      shutil.copy("evaluator.py", os.path.join(tmpdir, "evaluator.py"))
+      fixture_dir = os.path.dirname(__file__)
+      shutil.copy(os.path.join(fixture_dir, "initial_program.py"), prog_dst)
+      shutil.copy(os.path.join(fixture_dir, "evaluator.py"), os.path.join(tmpdir, "evaluator.py"))
       output_file = os.path.join(tmpdir, "scores.json")
 
       result = subprocess.run(
@@ -187,7 +188,7 @@ class TestCLIInterface:
       broken = os.path.join(tmpdir, "broken.py")
       with open(broken, "w") as f:
         f.write("def !!!")
-      shutil.copy("evaluator.py", os.path.join(tmpdir, "evaluator.py"))
+      shutil.copy(os.path.join(os.path.dirname(__file__), "evaluator.py"), os.path.join(tmpdir, "evaluator.py"))
       output_file = os.path.join(tmpdir, "scores.json")
 
       result = subprocess.run(

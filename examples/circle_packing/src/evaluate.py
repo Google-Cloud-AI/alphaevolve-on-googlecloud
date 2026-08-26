@@ -47,10 +47,10 @@ def circle_packing_evaluation(program_candidate) -> dict:
     code = program_candidate["content"]["files"][0]["content"]
     logger.debug("Code length: %d", len(code))
 
-    # Sentinel used when the program fails to produce a valid score. The API
-    # requires a numeric score per metric and `sum_of_radii` is maximized, so a
-    # large negative value keeps failed candidates from being selected.
-    score_value: float = -1e12
+    # Failed candidates are represented as None in the local evaluator. The
+    # client/controller layer is responsible for translating invalid results to
+    # the numeric sentinel required by the remote AlphaEvolve API.
+    score_value: float | None = None
     insights_list: list[AlphaEvolveEvaluationInsight] = []
 
     try:
@@ -60,16 +60,18 @@ def circle_packing_evaluation(program_candidate) -> dict:
 
         if callable(eval_func):
             result = eval_func(CIRCLE_PACKING_EVALUATION_INPUTS)
+            if not isinstance(result, Mapping):
+                raise TypeError("evaluate() must return a mapping of metric names to scores")
             score = result.get(CIRCLE_PACKING_EVALUATION_METRIC)
-            if score != -np.inf and score is not None:
-                score_value = float(score)
-            else:
+            if score is None or not np.isfinite(score):
                 insights_list.append(
                     AlphaEvolveEvaluationInsight(
                         label="Invalid Score",
-                        text="The evaluation function returned an invalid score (-infinity or None), suggesting the packing constraints were not met.",
+                        text="The evaluation function returned an invalid score (-infinity, infinity, NaN, or None), suggesting the packing constraints were not met.",
                     )
                 )
+            else:
+                score_value = float(score)
         else:
             insights_list.append(
                 AlphaEvolveEvaluationInsight(
