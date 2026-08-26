@@ -119,7 +119,7 @@ def evaluate_program(code: str, timeout_seconds: int = 30) -> dict[str, Any]:
     stderr = stderr_capture.getvalue()
     raw_score = result.get(EVALUATION_METRIC)
 
-    if raw_score is not None and raw_score != -np.inf:
+    if raw_score is not None and np.isfinite(raw_score):
       insights = []
       if stdout:
         insights.append({"label": "stdout", "text": stdout})
