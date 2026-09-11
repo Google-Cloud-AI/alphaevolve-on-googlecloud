@@ -161,8 +161,8 @@ class TestCLIInterface:
               "evaluator.py",
               "--output-file",
               output_file,
-              "--input-program-file",
-              "initial_program.py",
+              "--program-dir",
+              tmpdir,
           ],
           cwd=tmpdir,
           capture_output=True,
@@ -184,7 +184,7 @@ class TestCLIInterface:
     """main() writes error insights for broken programs."""
     tmpdir = tempfile.mkdtemp()
     try:
-      broken = os.path.join(tmpdir, "broken.py")
+      broken = os.path.join(tmpdir, "initial_program.py")
       with open(broken, "w") as f:
         f.write("def !!!")
       shutil.copy("evaluator.py", os.path.join(tmpdir, "evaluator.py"))
@@ -196,8 +196,8 @@ class TestCLIInterface:
               "evaluator.py",
               "--output-file",
               output_file,
-              "--input-program-file",
-              "broken.py",
+              "--program-dir",
+              tmpdir,
           ],
           cwd=tmpdir,
           capture_output=True,
