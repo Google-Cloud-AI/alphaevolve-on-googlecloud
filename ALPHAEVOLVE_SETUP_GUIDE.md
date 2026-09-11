@@ -50,9 +50,8 @@ Step 2.
 
 ### 4a. Get an active license
 
-Go to the Gemini Enterprise section of the Cloud Console for this project.
-There should be a **"Start free"** option for a trial, or a paid
-subscription flow if the trial isn't available.
+The free trial covers **30 days** and any edition's trial license is enough
+to grant access to AlphaEvolve — no need to pay upfront just to get started.
 
 Two things that are easy to get wrong here:
 - **Any edition works** (Business, Standard, Plus, Pay-as-you-go, or
@@ -86,14 +85,8 @@ gemini-enterprise-1234567890_1234567890123
 
 ## Step 5 — Grant access to whoever will actually use it
 
-Creating the project makes you its **Owner** by default, and setting up
-Gemini Enterprise on it typically makes you its **Gemini Enterprise Admin**
-too — both automatic, nothing extra to do for that part.
-
-But that alone doesn't let anyone else use it. If a different person is going to actually
-run things against this project, they need **two separate grants from you
-as the admin** — without both, they'll hit errors even with the right
-project/engine ID in hand:
+Creating the project makes you its **Owner** by default. To grant access to other people, they need **two separate grants from you
+as the admin**:
 
 1. **IAM access on the project** — go to **IAM & Admin → Add principal**,
    enter their Google account email, and grant them the
