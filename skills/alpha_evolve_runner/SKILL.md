@@ -208,10 +208,14 @@ Do NOT guess model IDs or read proto files.
 
 <!-- *** MANDATORY USER INTERACTION — NEVER SKIP THIS STEP *** -->
 
-> **CRITICAL: This confirmation step is MANDATORY and must NEVER be skipped,
-> even if all values were auto-discovered from an existing profile, `.env` file,
-> or `ae config discover`.** Auto-discovered values are frequently stale or
-> belong to a different project.
+> **CRITICAL: This confirmation step is MANDATORY for unverified profiles,
+> EXCEPT in pre-configured environments or autonomous execution.**
+>
+> **Pre-configured Environment / Autonomous Execution Exception:** If `ae config
+> show` already has a pre-configured profile and `ae --json config test`
+> succeeds, OR if the user explicitly asked to run the experiment end-to-end
+> without pausing, **do NOT pause for user confirmation** — proceed directly to
+> Step 1.3 and Stage 2.
 
 Present the resolved configuration as a table and ask the user to confirm:
 
@@ -229,7 +233,8 @@ Accept bare "yes", Enter, "y", or "looks good" as confirmation. If the user
 wants to change a value, update with `ae config --<flag>=<value>` and re-display
 the table until confirmed.
 
-**Do NOT proceed to Step 1.3 until the user explicitly confirms.**
+**Do NOT proceed to Step 1.3 until the user explicitly confirms (unless running
+under the Pre-configured Environment / Autonomous Execution Exception above).**
 
 <!-- *** END MANDATORY USER INTERACTION *** -->
 
@@ -329,6 +334,15 @@ Title        | derived from problem description | `--title`
 Models       | from config (Stage 1)            | `--models`
 
 <!-- *** MANDATORY USER INTERACTION *** -->
+
+> **MANDATORY FOR INTERACTIVE USERS:** You **MUST** present the summary table
+> below (including the verified `Baseline Score`) and wait for user confirmation
+> before launching Stage 4.
+>
+> **Autonomous / Unattended Benchmark Exception:** Only skip this confirmation
+> if the user **explicitly** instructed you to run without asking for
+> confirmation (e.g., *"run autonomously without pausing"* or *"do not ask for
+> confirmation"*).
 
 Present a summary table of ALL parameters before creating the experiment:
 
