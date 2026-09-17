@@ -22,8 +22,11 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 import json
+import os
+import re
 import time
 import typing
+import uuid
 import warnings
 
 import google.auth
@@ -111,11 +114,18 @@ class AlphaEvolveClient:
     ):
       self._base_url = f"https://{self._base_url}"
 
-    # Authenticate via ADC.
-    self._credentials, self._gcp_project = google.auth.default(
-        scopes=["https://www.googleapis.com/auth/cloud-platform"],
-    )
-    self._auth_request = google.auth.transport.requests.Request()
+    # Authenticate via injected access token (e.g. inside sandbox VMs without
+    # ambient ADC) or fall back to standard google.auth.default() ADC.
+    self._static_token = os.environ.get("ALPHAEVOLVE_ACCESS_TOKEN")
+    if self._static_token:
+      self._credentials = None
+      self._gcp_project = cfg.project
+      self._auth_request = None
+    else:
+      self._credentials, self._gcp_project = google.auth.default(
+          scopes=["https://www.googleapis.com/auth/cloud-platform"],
+      )
+      self._auth_request = google.auth.transport.requests.Request()
     self._resolved_session = None  # Cache for resolved session ID
 
   # -----------------------------------------------------------------
@@ -177,10 +187,26 @@ class AlphaEvolveClient:
     if self._verbose:
       print("Provisioning a new session ID from the server...")
 
+    params: dict[str, typing.Any] = {}
+    body: dict[str, typing.Any] = {"display_name": "AlphaEvolve Session"}
+    user_pseudo_id = self._config.user_pseudo_id
+    if user_pseudo_id:
+      body["user_pseudo_id"] = user_pseudo_id
+      clean_prefix = (
+          re.sub(r"[^a-z0-9-]", "-", user_pseudo_id.lower()).strip("-")
+          or "proj"
+      )
+      suffix = uuid.uuid4().hex[:12]
+      max_prefix_len = 63 - 1 - len(suffix)
+      clean_prefix = clean_prefix[:max_prefix_len].rstrip("-")
+      session_id = f"{clean_prefix}-{suffix}"
+      params["sessionId"] = session_id
+
     resp = self._request(
         "POST",
         f"{parent}/sessions",
-        json_body={"display_name": "AlphaEvolve Session"},
+        params=params or None,
+        json_body=body,
     )
 
     session_name = resp.get("name")
@@ -202,8 +228,8 @@ class AlphaEvolveClient:
       page_size: Max number of items to return per page request.
       **extra_params: Optional parameters to pass into query URL.
 
-    Returns:
-      An Iterator yielding dict objects representing Session details.
+    Yields:
+      Dict objects representing Session details.
     """
     # Remove '/sessions/...' part from parent to get engine parent
     path = (
@@ -213,12 +239,31 @@ class AlphaEvolveClient:
         f"/engines/{self._config.engine}"
         "/sessions"
     )
-    return self._list_all(
+    user_pseudo_id = self._config.user_pseudo_id
+    if user_pseudo_id and "filter" not in extra_params:
+      extra_params["filter"] = f'user_pseudo_id = "{user_pseudo_id}"'
+    for session in self._list_all(
         path,
         "sessions",
         pageSize=page_size,
         **extra_params,
-    )
+    ):
+      if user_pseudo_id:
+        s_user = (
+            session.get("userPseudoId") or session.get("user_pseudo_id") or ""
+        )
+        if s_user:
+          if s_user != user_pseudo_id:
+            continue
+        else:
+          clean_prefix = (
+              re.sub(r"[^a-z0-9-]", "-", user_pseudo_id.lower()).strip("-")
+              or "proj"
+          )
+          s_id = session.get("name", "").split("/")[-1]
+          if s_id and not s_id.startswith(f"{clean_prefix}-"):
+            continue
+      yield session
 
   def list_engines(
       self,
@@ -256,14 +301,21 @@ class AlphaEvolveClient:
 
   def _refresh_credentials(self) -> None:
     """Refresh ADC credentials if needed."""
-    if not self._credentials.valid:
+    if (
+        self._credentials is not None
+        and not self._credentials.valid
+        and self._auth_request is not None
+    ):
       self._credentials.refresh(self._auth_request)
 
   def _headers(self) -> dict[str, str]:
     """Build request headers with auth + quota attribution."""
     self._refresh_credentials()
+    token = self._static_token or (
+        self._credentials.token if self._credentials is not None else ""
+    )
     headers = {
-        "Authorization": f"Bearer {self._credentials.token}",
+        "Authorization": f"Bearer {token}",
         "Content-Type": "application/json",
     }
     project = self._config.project or self._gcp_project
