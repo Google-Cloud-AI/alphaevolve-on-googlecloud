@@ -38,7 +38,9 @@ import typing
 # Defaults
 # ---------------------------------------------------------------------------
 
-CONFIG_DIR = pathlib.Path.home() / ".config" / "ae"
+CONFIG_DIR = pathlib.Path(
+    os.environ.get("AE_CONFIG_DIR", pathlib.Path.home() / ".config" / "ae")
+)
 PROFILES_DIR = CONFIG_DIR / "profiles"
 ACTIVE_FILE = CONFIG_DIR / "active"
 OPERATIONS_FILE = CONFIG_DIR / "operations.json"
@@ -52,13 +54,14 @@ BUILT_IN_DEFAULTS: dict[str, typing.Any] = {
     "session": "[create new]",
     "model": "GEMINI_V2P5_FLASH",
     "base_url": "",
+    "user_pseudo_id": "",
     "output_format": "table",
     "color": True,
 }
 
-# Map from .env variable names → config keys (for CWD .env loading).
-_ENV_KEY_MAP: dict[str, str] = {
+_SHORT_ENV_KEYS: dict[str, str] = {
     "PROJECT_ID": "project",
+    "PROJECT_NUMBER": "project",
     "LOCATION": "location",
     "COLLECTION": "collection",
     "ENGINE": "engine",
@@ -66,6 +69,14 @@ _ENV_KEY_MAP: dict[str, str] = {
     "ASSISTANT": "session",  # Alias for session
     "MODEL": "model",
     "BASE_URL": "base_url",
+    "USER_ID": "user_pseudo_id",
+}
+
+# Map from .env file variable names → config keys (supports both short names
+# and ALPHAEVOLVE_-prefixed names).
+_ENV_KEY_MAP: dict[str, str] = {
+    **_SHORT_ENV_KEYS,
+    **{f"ALPHAEVOLVE_{k}": v for k, v in _SHORT_ENV_KEYS.items()},
 }
 
 
@@ -99,6 +110,7 @@ class Config:
   # compatibility with legacy `[model]` profiles.
   models: list[ModelEntry] = dataclasses.field(default_factory=list)
   base_url: str = ""
+  user_pseudo_id: str = ""
   output_format: str = "table"
   color: bool = True
 
@@ -246,8 +258,8 @@ def load_profile(name: str) -> dict[str, typing.Any]:
       # key-value pairs (e.g. "name", "weight" and their values).
       flat[key] = section
     else:
-      # Top-level scalar (shouldn't happen with our schema, but handle it).
-      pass
+      # Top-level scalar (handle flat TOML profiles gracefully).
+      flat[key] = section
   return flat
 
 
@@ -279,6 +291,7 @@ def save_profile(
       "engine",
       "session",
       "base_url",
+      "user_pseudo_id",
   }
   _model_keys = {"model"}
   _output_keys = {"output_format", "color"}
@@ -422,6 +435,27 @@ def _load_dotenv(path: pathlib.Path) -> dict[str, typing.Any]:
   return result
 
 
+def _load_environ() -> dict[str, typing.Any]:
+  """Reads ALPHAEVOLVE_* environment variables into a config dictionary.
+
+  Only prefixed variables are read from os.environ (unlike .env files which
+  also allow short names like LOCATION or MODEL). Both PROJECT_ID and
+  PROJECT_NUMBER map to `project`; PROJECT_NUMBER is evaluated after
+  PROJECT_ID so that an explicit numeric project number takes precedence if
+  both environment variables are set.
+
+  Returns:
+    A dictionary mapping resolved configuration keys to their environment
+    variable values.
+  """
+  result: dict[str, typing.Any] = {}
+  for short_key, config_key in _SHORT_ENV_KEYS.items():
+    val = os.environ.get(f"ALPHAEVOLVE_{short_key}", "").strip()
+    if val:
+      result[config_key] = val
+  return result
+
+
 # ---------------------------------------------------------------------------
 # Config resolution
 # ---------------------------------------------------------------------------
@@ -435,9 +469,10 @@ def load_config(
 
   Priority (highest first):
     1. cli_overrides (from --project, --location, etc.)
-    2. CWD .env file
-    3. Active profile
-    4. Built-in defaults
+    2. ALPHAEVOLVE_* environment variables
+    3. CWD .env file
+    4. Active profile
+    5. Built-in defaults
 
   Args:
     cli_overrides: Optional dictionary of overrides provided via CLI flags.
@@ -461,6 +496,10 @@ def load_config(
   # Layer: CWD .env.
   env_vals = _load_dotenv(pathlib.Path.cwd() / ".env")
   merged.update({k: v for k, v in env_vals.items() if v})
+
+  # Layer: ALPHAEVOLVE_* environment variables.
+  os_env_vals = _load_environ()
+  merged.update({k: v for k, v in os_env_vals.items() if v})
 
   # Layer: CLI flags.
   if cli_overrides:
