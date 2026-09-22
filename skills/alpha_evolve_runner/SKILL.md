@@ -37,6 +37,14 @@ and get an experiment running on the AlphaEvolve backend.
 > environment variables).
 
 
+> **Cloud Batch / Cluster Toolkit (`gcluster`) users:** If the user wants to run
+> candidate evaluations remotely on **Google Cloud Batch** (`gcluster`,
+> `alpha-evolve-infra.yaml`, `alpha-evolve-experiment.yaml`) in an
+> `hpc_solutions` / `scientific-computing-examples` checkout, consult
+> `blueprints/alphaevolve/README.md` and `blueprints/alphaevolve/AGENT.md` in
+> that repository and use **Stage 4B (Remote Cloud Batch Launch)** below instead
+> of local `ae experiment run`.
+
 ### ae CLI Discovery
 
 The `ae` CLI **must** be installed and executable. Follow this discovery
@@ -170,23 +178,27 @@ multiple engines exist.
 
 ```bash
 ae config \
+  --name=<active_profile> \
   --project=<PROJECT_ID> \
   --engine=<ENGINE_ID> \
   --location=global \
-  --models=gemini-3.5-flash
+  --model=gemini-3.5-flash
 ```
 
-> **IMPORTANT: `ae config` syntax and profile pitfall.**
+> **IMPORTANT: `ae config` syntax and profile/session pitfalls.**
 >
-> All flags use `--flag=value` syntax. Set them all in one call.
+> All flags use `--flag=value` syntax. Note that `ae config` uses `--model`
+> (singular), whereas `ae experiment create` uses `--models` (plural).
 >
-> **Profile pitfall:** `ae config` without `--name` updates the `default`
-> profile, which may NOT be the active profile. Always check the active profile
-> first with `ae --json config show` (look at the `Profile` field), then pass
-> `--name=<active_profile>`:
+> **Profile & session pitfall:** `ae config` without `--name` updates the
+> `default` profile, which may NOT be the active profile or may contain a cached
+> `Session` ID bound to a different engine (causing `[403] User does not have
+> access to the session` during `ae config test`). Check `ae --json config show`
+> first; if changing engines, create and switch to a clean profile (`ae config
+> --name=clean --project=... --engine=... && ae config switch clean`):
 
 ```bash
-ae config --name=<active_profile> --models=<model_spec>
+ae config --name=<active_profile> --model=<model_spec>
 ```
 
 > Without `--name`, the change silently writes to the wrong profile.
@@ -475,6 +487,43 @@ ae --json experiment describe <nickname>
 ```
 
 Verify the status is ACTIVE.
+
+### Stage 4B: Remote Cloud Batch / Cluster Toolkit (`gcluster`) Launch
+
+When running on **Google Cloud Batch** via Cluster Toolkit (`gcluster`), follow
+`blueprints/alphaevolve/README.md` and `blueprints/alphaevolve/AGENT.md` in the
+`hpc_solutions` / `scientific-computing-examples` repository to deploy
+`alpha-evolve-infra.yaml` and `alpha-evolve-experiment.yaml` and run the
+headless controller (`python3 -m alpha_evolve.runner --mode controller`).
+Enforce these three non-negotiable guardrails:
+
+1.  **NEVER remove or shrink `EVOLVE-BLOCK` markers.** Failed candidate Cloud
+    Batch jobs caused by LLM syntax/compilation errors (`status=FAILURE`,
+    `score=None`) or Spot VM preemption (`exit code 137`/`143`) are normal
+    during evolution. Never delete `# EVOLVE-BLOCK-START` / `//
+    EVOLVE-BLOCK-START` markers to force candidates to compile.
+2.  **Keep `user_experiment_name` $\le 15$ characters** (e.g. `cp-batch-01`).
+    `alpha-evolve-experiment.yaml` constructs the IAM service account ID
+    `ae-exp-${user_experiment_name}-eval-sa`, which fails GCP's 30-character IAM
+    limit if `user_experiment_name` exceeds 15 characters.
+3.  **Bridge `gcluster` (`current_experiment.json`) $\rightarrow$ `ae` CLI &
+    Teardown:** Once the controller starts or finishes, read `session_name` and
+    `experiment_name` from
+    `gs://<bucket>/<user_experiment_name>/current_experiment.json`, configure
+    the active `ae` profile, inspect with `ae` CLI (`alpha-evolve-monitor` and
+    `alpha-evolve-post-experiment`), and tear down ephemeral compute:
+
+    ```bash
+    META_URI="gs://<bucket>/<user_experiment_name>/current_experiment.json"
+    SESSION_ID=$(gcloud storage cat "$META_URI" \
+      | jq -r '.session_name | split("/") | last')
+    EXPERIMENT_ID=$(gcloud storage cat "$META_URI" \
+      | jq -r '.experiment_name | split("/") | last')
+    ae config --name=<active_profile> --session="$SESSION_ID"
+    ae --json experiment describe "$EXPERIMENT_ID"
+    ae --json program list "$EXPERIMENT_ID"
+    gcluster destroy <deployment_dir> --auto-approve
+    ```
 
 --------------------------------------------------------------------------------
 
