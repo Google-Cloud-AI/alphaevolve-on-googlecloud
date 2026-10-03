@@ -18,9 +18,19 @@ Lin-Kernighan-style moves, simulated annealing, etc.).
 
 | Metric | Description |
 |--------|-------------|
-| `neg_tour_length` | **Primary.** Negative of the average tour length across 5 test instances (higher is better). |
-| `tour_validity` | 1.0 if every tour is a valid permutation, 0.0 otherwise. |
+| `neg_tour_length` | **Primary, and the only submitted metric.** Negative of the average tour length across 5 test instances (higher is better). |
+
+Two further quantities are computed and returned as **insights** rather than metrics. They feed
+back into the LLM's next generation but are not optimization targets:
+
+| Insight | Description |
+|---------|-------------|
+| `tour_validity` | Reported when one or more tours are not valid permutations. |
 | `avg_improvement_over_random` | Average percentage improvement over random tours. |
+
+A candidate that crashes, omits `evaluate()`, or produces an invalid tour is scored
+`-1e9` rather than left unscored — see the
+[scoring convention](../../README.md#scoring-convention).
 
 ## Evaluation
 

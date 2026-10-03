@@ -10,6 +10,31 @@ This example demonstrates how to evolve a Rust sorting algorithm that adapts to 
 - `evaluator.py`: Contains the client-side evaluation logic.
 - `sort_test/`: Local test harness files (for reference or local development).
 
+## Metrics
+
+The harness benchmarks each candidate over **10 datasets — 5 shapes (random, nearly-sorted,
+reverse-sorted, many-duplicates, partially-sorted) at 1,000 and 10,000 elements**
+(`sort_test/src/main.rs`).
+
+| Metric | Description |
+|--------|-------------|
+| `score` | **Primary.** `0.6 × performance_score + 0.4 × adaptability_score`, or `0.0` if any case sorted incorrectly. Higher is better. |
+| `performance_score` | `1 / (1 + avg_time × 10)`. Higher is faster. |
+| `adaptability_score` | `1 / (1 + σ(times))`. Higher means more consistent across input shapes. |
+| `correctness` | `1.0` if all 10 cases sorted correctly, else `0.0`. |
+| `compile_success` | `1.0` if the candidate compiled, else `0.0`. |
+| `avg_time` | Mean sort time in seconds across the 10 cases. |
+| `memory_safe` | Always `1.0` — a placeholder; nothing currently measures memory. |
+
+Failure paths return a subset: a compile failure yields only `score` and `compile_success`, and
+a runtime failure adds `correctness`, `performance_score` and `adaptability_score` at `0.0`.
+
+**Build and run output reaches the model.** Compiler stderr, stdout and any error text are
+forwarded to AlphaEvolve as insights, so a candidate that fails to compile comes back with the
+compiler's own message attached. If the evaluator service itself is unreachable, the candidate
+is left unscored rather than penalized — see the
+[scoring convention](../../README.md#scoring-convention).
+
 ## Prerequisites
 
 1.  **Python Environment**: Ensure you have the `alpha_evolve` package installed or available in your `PYTHONPATH`.

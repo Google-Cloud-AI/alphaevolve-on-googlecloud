@@ -19,7 +19,8 @@
 
 namespace adaptive_sort {
 
-// Helper functions (EVOLVE-BLOCK-START)
+// Helper functions
+// EVOLVE-BLOCK-START
 template <typename T>
 void quicksort(std::vector<T>& arr, int low, int high);
 
@@ -31,7 +32,7 @@ bool is_nearly_sorted(const std::vector<T>& arr, double threshold);
 
 template <typename T>
 void insertion_sort(std::vector<T>& arr);
-// Helper functions (EVOLVE-BLOCK-END)
+// EVOLVE-BLOCK-END
 
 // Main adaptive sort function
 // EVOLVE-BLOCK-START

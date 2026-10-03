@@ -112,8 +112,9 @@ def plot_tour(
         segments.append([ordered[i], ordered[i + 1]])
     segments = np.array(segments)
 
-    # Color gradient: start dark, end lighter
-    cmap = plt.cm.get_cmap("Blues" if color == GOOGLE_BLUE else "Reds")
+    # Color gradient: start dark, end lighter.
+    # plt.cm.get_cmap was removed in matplotlib 3.9; plt.get_cmap is the supported spelling.
+    cmap = plt.get_cmap("Blues" if color == GOOGLE_BLUE else "Reds")
     colors = [cmap(0.3 + 0.6 * i / n) for i in range(n)]
 
     lc = LineCollection(segments, colors=colors, linewidths=1.8, zorder=3)
