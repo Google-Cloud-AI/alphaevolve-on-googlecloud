@@ -47,6 +47,16 @@ SKILL_DIRS: tuple[str, ...] = (
     "alpha_evolve_orchestrator",
     "alpha_evolve_consultant",
 )
+EXCLUDE_SKILL_FILES: tuple[str, ...] = (
+    "BUILD",
+    "METADATA",
+    "OWNERS",
+    "OWNERS_METADATA",
+    "EVAL*.txtpb",
+    "EVAL*.yaml",
+    "evals",
+    "harbor_eval",
+)
 
 # Canonical remote source, used when no local checkout is found and no
 # ``--source`` is given. No per-CLI-version tags exist yet, so the ref defaults
@@ -339,8 +349,9 @@ def _copy_skills(
       tempfile.mkdtemp(prefix="ae_skills_stage_", dir=dest.parent)
   )
   try:
+    ignore = shutil.ignore_patterns(*EXCLUDE_SKILL_FILES)
     for name in SKILL_DIRS:
-      shutil.copytree(skills_root / name, staging / name)
+      shutil.copytree(skills_root / name, staging / name, ignore=ignore)
     for name in SKILL_DIRS:
       target = dest / name
       _remove_path(target)  # Handles a stray file/symlink named like a skill.
