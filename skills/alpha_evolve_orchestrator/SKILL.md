@@ -148,7 +148,9 @@ proceeding.
 ## Phase 2: Runner
 
 **Objective:** Configure the `ae` CLI, verify the evaluator works, and launch
-the experiment on the AlphaEvolve backend.
+the experiment on the AlphaEvolve backend (either locally via `ae experiment
+run` or remotely on Google Cloud Batch via Cluster Toolkit `gcluster` and
+`blueprints/alphaevolve/AGENT.md`).
 
 **Sub-skill:** Load the `alpha-evolve-runner` skill.
 
