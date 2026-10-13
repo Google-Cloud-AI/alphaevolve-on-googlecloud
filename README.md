@@ -50,7 +50,7 @@ cloud infrastructure beyond the AlphaEvolve API. It's the fastest way to see the
 - Python **3.9+**, [`uv`](https://docs.astral.sh/uv/), and the [`gcloud` CLI](https://cloud.google.com/sdk/docs/install)
 - A Google Cloud project with **AlphaEvolve provisioned** (this gives you a Gemini Enterprise
   **App / Engine ID**). Follow the
-  [Install and configure](https://docs.cloud.google.com/gemini/enterprise/docs/alphaevolve/developer-guide/get-started)
+  [Install and configure](https://docs.cloud.google.com/gemini/enterprise/docs/alphaevolve/developer-guide/environment-and-api-access-setup)
   guide once, then reuse it for every example.
 
 ### Run it
@@ -264,7 +264,7 @@ as the Circle Packing example does.
 
 `GE_APP_ID` is the Engine ID of the Gemini Enterprise app created when you provision AlphaEvolve.
 Find it in the Google Cloud console under your Gemini Enterprise app, or via the
-[Install and configure](https://docs.cloud.google.com/gemini/enterprise/docs/alphaevolve/developer-guide/get-started) guide.
+[Install and configure](https://docs.cloud.google.com/gemini/enterprise/docs/alphaevolve/developer-guide/environment-and-api-access-setup) guide.
 
 ---
 
@@ -332,7 +332,7 @@ GKE + GPUs. Bound cost with the search-budget settings (`MAX_PROGRAMS_*`, `CONCU
 ## Documentation & support
 
 - **Overview & developer guide:** [Overview of AlphaEvolve](https://docs.cloud.google.com/gemini/enterprise/docs/alphaevolve/developer-guide/overview)
-- **Get started / provisioning:** [Install and configure AlphaEvolve](https://docs.cloud.google.com/gemini/enterprise/docs/alphaevolve/developer-guide/get-started)
+- **Get started / provisioning:** [Install and configure AlphaEvolve](https://docs.cloud.google.com/gemini/enterprise/docs/alphaevolve/developer-guide/environment-and-api-access-setup)
 - **Support & feedback:** for technical issues, release questions, or feedback, contact your
   assigned Google Cloud account team.
 - **Contributing:** this project is **not currently accepting external contributions**
