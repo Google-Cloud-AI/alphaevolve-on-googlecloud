@@ -85,36 +85,42 @@ Weights are **relative ratios and need not sum to 1.0** (e.g. `weight=0.9` +
 `weight=0.1` is the same 9:1 ratio as `9` + `1`); an omitted weight defaults to
 1.0. The chosen models persist in the profile as a `[[models]]` section.
 
+Leaving `--models` unset (and no `[[models]]` profile section) uses the API
+default model. The AlphaEvolve team moves that default to newer GA Gemini models
+as they are released, so unpinned experiments get a newer Gemini without any
+skill or CLI change. The "Default model" table in the AlphaEvolve API reference
+lists which model applies on which date. This is the recommended setting.
+
 Common configurations:
 
-| Goal                             | `--models` flag(s)                      |
-| -------------------------------- | --------------------------------------- |
-| High throughput / simple default | `--models gemini-3.5-flash`             |
-| General 90/10 Flash/Pro          | `--models                               |
-:                                  : name=gemini-3.5-flash,weight=0.9        :
-:                                  : --models                                :
-:                                  : name=gemini-3.1-pro-preview,weight=0.1` :
-| Hard problems (max quality)      | `--models gemini-3.1-pro-preview`       |
+Goal                         | `--models` flag(s)
+---------------------------- | ------------------
+Default (recommended)        | none (API default)
+Best quality, pinned         | `--models gemini-4-argon`
+High throughput / lower cost | `--models gemini-3.5-flash`
+General 90/10 Flash/Pro      | `--models name=gemini-3.5-flash,weight=0.9 --models name=gemini-3.1-pro-preview,weight=0.1`
 
 **Constraints:** At most 2 models per experiment. Model availability is
-per-region: `gemini-3.5-flash` is served in all enterprise regions
-(`global`/`us`/`eu`), while `gemini-3.1-pro-preview` is `global` only -- so any
-Flash/Pro mix implies `global`.
+per-region: `gemini-4-argon` and `gemini-3.5-flash` are served in all enterprise
+regions (`global`/`us`/`eu`), while `gemini-3.1-pro-preview` is `global` only --
+so any Flash/Pro mix implies `global`.
 
-### 8.2 When to Maximize Pro
+### 8.2 When to Keep the Default
 
-Use 100% Pro (`--models gemini-3.1-pro-preview`) when:
+The default tracks newer Gemini models, and `gemini-4-argon` is the strongest
+Gemini today. Use one of them when:
 
 - The problem requires novel algorithmic ideas (mathematical optimization, algorithm discovery, complex heuristic design)
 - Mutations involve restructuring code logic, not just parameter changes
 - The search space is large and requires creative leaps
--   Flash-heavy experiments (a 90/10 mix) plateaued early
+-   Flash-only experiments plateaued early
 
-Pro provides stronger reasoning, better understanding of complex algorithms, and more creative mutations.
+Argon provides stronger reasoning, better understanding of complex algorithms,
+and more creative mutations.
 
-### 8.3 When Flash-Heavy Is Sufficient
+### 8.3 When Flash Is Sufficient
 
-Use a 90/10 Flash/Pro mix or Flash-only when:
+Use `gemini-3.5-flash` (or a 90/10 Flash/Pro mix) when:
 
 - The optimization is essentially parameter tuning
 - Code changes are small and localized
@@ -122,9 +128,8 @@ Use a 90/10 Flash/Pro mix or Flash-only when:
 - The problem is well-understood
 - You want faster iteration (Flash is faster and cheaper)
 
-The simple default `gemini-3.5-flash` is a good starting point for most
-problems; add Pro for more reasoning power with a 90/10 Flash/Pro mix or 100%
-Pro (`global` only).
+Start with the default; switch to `gemini-3.5-flash` when throughput or cost
+matters more than mutation quality.
 
 ### 8.4 Model Selection is Per-Call
 
@@ -191,17 +196,12 @@ AlphaEvolve automatically diversifies the prompts it sends to the LLM. This is h
 
 ### 10.1 Recommended Starting Values
 
-| Parameter      | Recommendation               | Notes                       |
-| -------------- | ---------------------------- | --------------------------- |
-| `max_programs` | 100 (start), up to ~1000 for | Total evaluation budget     |
-:                : hard problems                :                             :
-| `concurrency`  | 10 (start), adjust per       | Parallel generators         |
-:                : Section 7                    :                             :
-| `models`       | default `gemini-3.5-flash`;  | See Section 8               |
-:                : add a 90/10 Flash/Pro mix or :                             :
-:                : 100% Pro for harder problems :                             :
-| `max_duration` | Longer for Pro-heavy (slower | Total experiment wall clock |
-:                : generation)                  :                             :
+Parameter      | Recommendation                                                       | Notes
+-------------- | -------------------------------------------------------------------- | -----
+`max_programs` | 100 (start), up to ~1000 for hard problems                           | Total evaluation budget
+`concurrency`  | 10 (start), adjust per Section 7                                     | Parallel generators
+`models`       | unset (API default); `gemini-3.5-flash` for throughput or lower cost | See Section 8
+`max_duration` | Longer for Argon (slower generation)                                 | Total experiment wall clock
 
 ### 10.2 Choosing the Right Baseline
 

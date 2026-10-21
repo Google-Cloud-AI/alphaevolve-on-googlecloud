@@ -22,7 +22,8 @@ Interactive or non-interactive configuration setup.
 # Non-interactive (set specific values)
 ae config --project=my-project --engine=my-engine --location=global
 
-# Set model(s) - bare name, or name=...,weight=... (repeatable)
+# Pin model(s) - bare name, or name=...,weight=... (repeatable). Leave unset
+# to use the API default, which tracks the strongest GA Gemini.
 ae config --models=gemini-3.5-flash
 
 # Set named profile
@@ -90,31 +91,18 @@ ae --json experiment create \
   --max-programs 100 \
   --concurrency 4 \
   --problem-file problem.md \
-  --title "My Experiment" \
-  --models gemini-3.5-flash
+  --title "My Experiment"
 ```
 
-| Flag             | Required | Default     | Description         |
-| ---------------- | -------- | ----------- | ------------------- |
-| `--max-programs` | Yes      | -           | Maximum programs to |
-:                  :          :             : generate (must      :
-:                  :          :             : be > 1)             :
-| `--concurrency`  | No       | 4           | Parallel program    |
-:                  :          :             : generation          :
-| `--problem`      | No*      | -           | Inline problem      |
-:                  :          :             : description         :
-| `--problem-file` | No*      | -           | Problem description |
-:                  :          :             : file                :
-| `--title`        | No       | ""          | Experiment title    |
-| `--language`     | No       | "python"    | Programming         |
-:                  :          :             : language            :
-| `--models`       | No       | from config | Model spec: bare    |
-:                  :          :             : name or             :
-:                  :          :             : name=...,weight=... :
-:                  :          :             : (repeatable).       :
-:                  :          :             : Replaces the        :
-:                  :          :             : singular `model`    :
-:                  :          :             : flag.               :
+Flag             | Required | Default     | Description
+---------------- | -------- | ----------- | -----------
+`--max-programs` | Yes      | -           | Maximum programs to generate (must be > 1)
+`--concurrency`  | No       | 4           | Parallel program generation
+`--problem`      | No*      | -           | Inline problem description
+`--problem-file` | No*      | -           | Problem description file
+`--title`        | No       | ""          | Experiment title
+`--language`     | No       | "python"    | Programming language
+`--models`       | No       | from config | Model spec: bare name or name=...,weight=... (repeatable). Replaces the singular `model` flag. Unset in both flag and config means the API default model.
 
 *One of `--problem` or `--problem-file` should be provided.
 

@@ -5,6 +5,16 @@ validates them. Use the API **model name** (e.g. `gemini-3.5-flash`), not the
 old preset enum. The legacy singular `model` flag is **deprecated** — use
 `--models`.
 
+## Default: leave `--models` unset
+
+When neither `--models` nor a profile `[[models]]` section is set, the CLI sends
+no model and the API applies its default. The AlphaEvolve team moves that
+default to newer GA Gemini models as they are released, so experiments get a
+newer Gemini without any skill or CLI change. The "Default model" table in the
+AlphaEvolve API reference lists which model applies on which date. The create
+response shows the model an experiment got, in `generationSettings.models`. Pin
+a model only when the user asks for a specific one or for lower cost.
+
 ## Syntax
 
 `--models` is repeatable (one flag per model). Each value is either a bare name
@@ -24,9 +34,10 @@ Same syntax on `ae config --models=...` and `ae experiment create --models ...`.
 ## Recommended models
 
 Model name               | Regions        | Notes
------------------------- | -------------- | ------------------------------
-`gemini-3.5-flash`       | global, us, eu | Recommended default
-`gemini-3.1-pro-preview` | global         | Higher quality; mix with flash
+------------------------ | -------------- | -----------------------------------
+`gemini-4-argon`         | global, us, eu | Strongest Gemini
+`gemini-3.5-flash`       | global, us, eu | Faster and cheaper; high throughput
+`gemini-3.1-pro-preview` | global         | Older Pro; mix with flash
 
 
 ## Notes

@@ -152,13 +152,13 @@ region (the API validates `--models` names and returns `INVALID_ARGUMENT`).
 **Fix:**
 
 1.  Read `references/models.md` for the recommended model names and regions.
-2.  Use the recommended default: `--models gemini-3.5-flash` (available in
-    global, us, and eu).
+2.  Use the recommended default: drop `--models` (and any `[[models]]` profile
+    section) so the API picks its default model, which is served in global, us,
+    and eu.
 3.  If it fails, the name is likely unavailable in your region — confirm the
     region with `ae --json config show`.
-4.  For a higher-quality mixture, pair flash with `gemini-3.1-pro-preview`
-    (global only): `--models name=gemini-3.5-flash,weight=0.9 --models
-    name=gemini-3.1-pro-preview,weight=0.1`.
+4.  For higher throughput at lower cost, use `--models gemini-3.5-flash` (also
+    global, us, and eu).
 5.  Do NOT guess model names that are not in `models.md`.
 6. After **2 failed model attempts**, ask the user which model they want.
 

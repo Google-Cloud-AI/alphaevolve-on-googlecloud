@@ -175,8 +175,7 @@ multiple engines exist.
 ae config \
   --project=<PROJECT_ID> \
   --engine=<ENGINE_ID> \
-  --location=global \
-  --models=gemini-3.5-flash
+  --location=global
 ```
 
 > **IMPORTANT: `ae config` syntax and profile pitfall.**
@@ -201,7 +200,14 @@ ae config --name=<active_profile> --models=<model_spec>
 -   `--location=global`
 -   `--collection=default_collection` (configurable if project uses a custom
     collection)
--   `--models=gemini-3.5-flash` (recommended default; available in all regions)
+-   Models: leave `--models` unset. The API then uses its default model, which
+    the AlphaEvolve team moves to newer GA Gemini models as they are released
+    (the "Default model" table in the AlphaEvolve API reference lists which
+    model applies on which date), so new experiments get a newer Gemini without
+    any skill or CLI change. Set `--models` only when the user asks for a
+    specific model or for lower cost. A `[[models]]` section in the active
+    profile (see `ae --json config show`) also pins the model; tell the user
+    when one is set.
 -   `--base-url=https://discoveryengine.googleapis.com` (prod default; only
     change if directed to a different endpoint)
 
@@ -227,7 +233,7 @@ Setting      | Value                                    | Source
 Project      | `my-project-123`                         | ae config discover
 Engine       | `alpha-evolve-engine`                    | auto-discovered
 Location     | `global`                                 | default
-Models       | `gemini-3.5-flash`                       | default
+Models       | API default (strongest GA Gemini)        | default
 API Endpoint | `https://discoveryengine.googleapis.com` | default (prod)
 
 "Does this look correct? (Y/n)"
@@ -353,7 +359,7 @@ Parameter      | Value
 -------------- | ----------------------------------------
 Project        | `my-project-123`
 Engine         | `alpha-evolve-engine`
-Models         | `gemini-3.5-flash`
+Models         | API default (strongest GA Gemini)
 API Endpoint   | `https://discoveryengine.googleapis.com`
 Max Programs   | 100
 Concurrency    | 4
@@ -561,7 +567,7 @@ See `references/cli_reference.md` for the full command reference.
 # Step 1: Create experiment (returns nickname)
 ae --json experiment create \
   --max-programs 100 --problem-file problem_description.md \
-  --title "My Experiment" --models gemini-3.5-flash
+  --title "My Experiment"
 
 # Step 2: Start experiment (uploads program files + baseline)
 ae --json experiment start <nickname> \
