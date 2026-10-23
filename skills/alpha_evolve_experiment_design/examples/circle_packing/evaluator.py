@@ -2,7 +2,7 @@
 
 CLI-compatible evaluator for use with the ae CLI.
 The ae CLI invokes this as:
-  python evaluator.py --output-file <path> --input-program-file <path>
+  python evaluator.py --output-file <path> --program-dir <path>
 """
 
 import argparse
@@ -10,6 +10,7 @@ import contextlib
 import io
 import json
 import logging
+import os
 import signal
 import traceback
 from typing import Any, Mapping
@@ -178,19 +179,16 @@ def main():
   """CLI entry point. Called by the ae CLI.
 
   The ae CLI invokes this as:
-    python evaluator.py --output-file <path> --input-program-file <path> [...]
+    python evaluator.py --output-file <path> --program-dir <path>
+  It finds and execs `initial_program.py` inside --program-dir.
   """
   parser = argparse.ArgumentParser()
   parser.add_argument("--output-file", required=True)
-  parser.add_argument(
-      "--input-program-file",
-      required=True,
-      action="append",
-      help="Path to a program file to evaluate (repeatable).",
-  )
+  parser.add_argument("--program-dir", required=True)
   args = parser.parse_args()
 
-  with open(args.input_program_file[0]) as f:
+  program_path = os.path.join(args.program_dir, "initial_program.py")
+  with open(program_path) as f:
     code = f.read()
 
   result = evaluate_program(code)
