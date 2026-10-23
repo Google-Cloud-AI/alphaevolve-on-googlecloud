@@ -60,13 +60,14 @@ git clone https://github.com/Google-Cloud-AI/alphaevolve-on-googlecloud.git
 cd alphaevolve-on-googlecloud
 
 # Install the alpha_evolve package (from src/) with uv
-uv pip install -e ".[examples]"
+uv sync
 
 # Configure and run the Circle Packing example
 cd examples/circle_packing
 make setup      # creates .env from the template (also ensures the package is installed)
 #               then edit .env and set PROJECT_ID and GE_APP_ID
 make auth       # gcloud auth application-default login
+source ../../.venv/bin/activate  # activate the python environment
 make run        # start the experiment
 ```
 
