@@ -45,4 +45,4 @@ auth: ## Authenticate with GCP
 	gcloud auth application-default login
 
 run: ## Run the AlphaEvolve experiment
-	cd ../.. && python -m examples.$(EXAMPLE_NAME).src.run_evolution
+	cd ../.. && uv run python -m examples.$(EXAMPLE_NAME).src.run_evolution
