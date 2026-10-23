@@ -179,14 +179,23 @@ evolved_program/
 
 | Metric | Description |
 |--------|-------------|
-| `neg_eval_loss` | Primary metric (higher = better). Negative of eval loss. |
-| `eval_perplexity` | Perplexity on held-out split (lower = better). |
-| `train_loss` | Final training loss. |
-| `training_time_seconds` | Wall-clock time for 200 training steps. |
+| `neg_eval_loss` | **Primary** (higher = better). Negative of eval loss. |
+| `eval_perplexity` | Perplexity on the held-out split. Lower is genuinely better, but it is submitted as a metric, so treat it as a reported diagnostic rather than an optimization target. |
+| `train_loss` | Final training loss. Same caveat as `eval_perplexity`. |
+| `merged_model_gcs` | GCS path of the merged LoRA adapter. Present only when the best-effort merge succeeds. Not a numeric metric. |
 
-Failed evaluations return `neg_eval_loss = -100.0` with an insight message
-explaining what went wrong (OOM, invalid config, etc.). These insights feed
-back into AlphaEvolve's LLM to guide the next generation of candidates.
+A training job that fails (OOM, invalid config, etc.) returns `neg_eval_loss = -100.0` with an
+insight message explaining what went wrong. These insights feed back into AlphaEvolve's LLM to
+guide the next generation of candidates.
+
+Two guards sit in front of that, per the
+[scoring convention](../../README.md#scoring-convention):
+
+- A metric the job reports as non-finite is submitted as `-1e9` instead. `eval_perplexity` is
+  `inf` whenever training diverges, and since AlphaEvolve maximizes, an unguarded `+inf` would
+  be an unbeatable score awarded to a total failure.
+- A metric the job reports as `null` is also `-1e9`, rather than the `0.0` it used to become —
+  `0.0` outranks every real `neg_eval_loss`, which is negative.
 
 ## Cost Estimate
 

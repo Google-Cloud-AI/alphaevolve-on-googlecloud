@@ -37,6 +37,8 @@ import numpy as np
 from scipy import signal
 from scipy.stats import pearsonr
 
+from alpha_evolve import scoring
+
 logger = logging.getLogger(__name__)
 
 
@@ -410,7 +412,9 @@ def evaluate(process_signal_func):
         insights.append(
             {"label": "evaluation_error", "text": "All test signals failed during evaluation."}
         )
-        return {"overall_score": None}, insights
+        # Every signal failed: that is the candidate's fault, so penalize rather than
+        # leave it unscored.
+        return {"overall_score": scoring.hard_penalty()}, insights
 
     # Calculate aggregate metrics
     avg_composite_score = np.mean(all_scores)
@@ -499,7 +503,9 @@ def signal_processing_evaluation(program_candidate) -> dict:
     files = program_candidate.get("content", {}).get("files", [])
     if not files:
         return {
-            "scores": {"scores": [{"metric": "overall_score", "score": None}]},
+            "scores": {
+                "scores": [{"metric": "overall_score", "score": scoring.hard_penalty()}]
+            },
             "insights": {
                 "insights": [{"label": "program_error", "text": "No program files in candidate"}]
             },
@@ -507,6 +513,11 @@ def signal_processing_evaluation(program_candidate) -> dict:
 
     code = files[0]["content"]
     logger.debug("Code length: %d", len(code))
+
+    # Bound before the try so the handler below can append to it. Without this, a candidate
+    # that fails to exec or omits process_signal raises UnboundLocalError out of the except
+    # clause, and the evaluator returns nothing at all.
+    insights = []
 
     try:
         exec_namespace = {"deque": deque, "signal": signal, "np": np}
@@ -537,7 +548,9 @@ def signal_processing_evaluation(program_candidate) -> dict:
         logger.error(f"Evaluation failed: {str(e)}")
         insights.append({"label": "evaluation_error", "text": f"Evaluation failed: {str(e)}"})
         evaluation = {
-            "scores": {"scores": [{"metric": "overall_score", "score": None}]},
+            "scores": {
+                "scores": [{"metric": "overall_score", "score": scoring.hard_penalty()}]
+            },
             "insights": {"insights": insights},
         }
 
