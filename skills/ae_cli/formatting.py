@@ -452,7 +452,9 @@ def format_error(
       403: "Check project permissions and API enablement.",
       404: "Resource not found. Verify the experiment/program name.",
       429: "Rate limited. Wait a moment and retry.",
+      502: "Bad gateway; the service may be overloaded. Retry shortly.",
       503: "Service temporarily unavailable. Retry shortly.",
+      504: "Gateway timeout. Retry shortly.",
   }
   hint = hints.get(status_code)
   if hint:

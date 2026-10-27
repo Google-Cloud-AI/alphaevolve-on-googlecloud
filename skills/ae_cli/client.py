@@ -23,6 +23,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 import json
 import os
+import random
 import re
 import time
 import typing
@@ -34,6 +35,22 @@ import google.auth.transport.requests
 import requests
 
 from . import config
+
+# Retry policy for transient failures: gateway errors, rate limits and dropped
+# connections. Backoff doubles from INITIAL_BACKOFF_SECONDS with jitter, no
+# single sleep exceeds MAX_BACKOFF_SECONDS, and no retry starts once
+# RETRY_DEADLINE_SECONDS have passed since the first attempt.
+MAX_ATTEMPTS = 6
+INITIAL_BACKOFF_SECONDS = 1.0
+MAX_BACKOFF_SECONDS = 30.0
+RETRY_DEADLINE_SECONDS = 120.0
+_RETRYABLE_STATUS_CODES = frozenset({429, 502, 503, 504})
+_RETRYABLE_EXCEPTIONS = (
+    requests.exceptions.ConnectionError,
+    requests.exceptions.Timeout,
+    requests.exceptions.ChunkedEncodingError,
+)
+_IDEMPOTENT_METHODS = frozenset({"GET", "DELETE"})
 
 
 class ApiError(Exception):
@@ -329,37 +346,87 @@ class AlphaEvolveClient:
       path: str,
       params: dict[str, typing.Any] | None = None,
       json_body: dict[str, typing.Any] | None = None,
+      idempotent: bool | None = None,
   ) -> dict[str, typing.Any]:
     """Makes an authenticated HTTP request to the API surface.
+
+    Transient failures (HTTP 429/502/503/504, connection errors and timeouts)
+    are retried with exponential backoff, up to MAX_ATTEMPTS attempts and
+    RETRY_DEADLINE_SECONDS.
 
     Args:
       method: The HTTP method (e.g. 'GET', 'POST').
       path: The relative endpoint path target.
       params: Optional dictionary of URL query parameters.
       json_body: Optional dictionary of JSON request payload body.
+      idempotent: Whether repeating the request is safe even if the server
+        already acted on it. Defaults to True for GET and DELETE. A
+        non-idempotent request is retried only on 429 and connect timeouts,
+        where the server did not act on it.
 
     Returns:
       A dictionary representation of the JSON response body.
 
     Raises:
-      ApiError: If the response status code is 400 or above.
+      ApiError: If the response status code is 400 or above, or the request
+        failed at the transport level: 503 once retries are exhausted, 408 when
+        a non-idempotent request may have reached the server.
     """
     url = self._url(path)
-    headers = self._headers()
+    if idempotent is None:
+      idempotent = method in _IDEMPOTENT_METHODS
 
     if self._verbose:
       print(f"  → {method} {url}")
       if json_body:
         print(f"    body: {json.dumps(json_body, indent=2)[:500]}")
 
-    resp = self._session.request(
-        method, url, headers=headers, params=params, json=json_body, timeout=60
-    )
+    start = time.monotonic()
+    attempt = 0
+    while True:
+      attempt += 1
+      # Rebuilt on every attempt so a token that expires during backoff is
+      # refreshed.
+      headers = self._headers()
+      try:
+        resp = self._session.request(
+            method,
+            url,
+            headers=headers,
+            params=params,
+            json=json_body,
+            timeout=60,
+        )
+      except _RETRYABLE_EXCEPTIONS as e:
+        if not idempotent and not isinstance(
+            e, requests.exceptions.ConnectTimeout
+        ):
+          raise ApiError(
+              408,
+              f"No response to {method} {path} ({e}). The request may have"
+              " taken effect; check before retrying.",
+          ) from e
+        if not self._sleep_before_retry(attempt, start, type(e).__name__, None):
+          raise ApiError(503, f"Request failed: {e}") from e
+        continue
 
-    if self._verbose:
-      print(f"  ← {resp.status_code}")
-      if resp.status_code >= 400:
-        print(f"  ← BODY: {resp.text[:2000]}")
+      if self._verbose:
+        print(f"  ← {resp.status_code}")
+        if resp.status_code >= 400:
+          print(f"  ← BODY: {resp.text[:2000]}")
+
+      if (
+          resp.status_code in _RETRYABLE_STATUS_CODES
+          and (idempotent or resp.status_code == 429)
+          and self._sleep_before_retry(
+              attempt,
+              start,
+              f"HTTP {resp.status_code}",
+              resp.headers.get("Retry-After"),
+          )
+      ):
+        continue
+      break
 
     if resp.status_code >= 400:
       try:
@@ -369,6 +436,8 @@ class AlphaEvolveClient:
       except Exception:  # pylint: disable=broad-exception-caught
         msg = resp.text
         details = None
+      if not idempotent and resp.status_code in _RETRYABLE_STATUS_CODES - {429}:
+        msg = f"{msg} The request may have taken effect; check before retrying."
       raise ApiError(resp.status_code, msg, details)
 
     if resp.status_code == 204 or not resp.content:
@@ -377,6 +446,45 @@ class AlphaEvolveClient:
       return resp.json()
     except Exception:  # pylint: disable=broad-exception-caught
       return {}
+
+  def _sleep_before_retry(
+      self,
+      attempt: int,
+      start: float,
+      reason: str,
+      retry_after: str | None,
+  ) -> bool:
+    """Sleeps before the next attempt, honoring a numeric Retry-After.
+
+    Args:
+      attempt: The 1-based number of the attempt that just failed.
+      start: `time.monotonic()` at the first attempt.
+      reason: What failed, for verbose output.
+      retry_after: The response's Retry-After header, if any.
+
+    Returns:
+      False, without sleeping, if the retry budget is spent.
+    """
+    if attempt >= MAX_ATTEMPTS:
+      return False
+    delay = min(
+        MAX_BACKOFF_SECONDS, INITIAL_BACKOFF_SECONDS * 2 ** (attempt - 1)
+    )
+    delay = random.uniform(delay / 2, delay)
+    if retry_after:
+      try:
+        delay = min(MAX_BACKOFF_SECONDS, max(0.0, float(retry_after)))
+      except ValueError:
+        pass
+    if time.monotonic() - start + delay > RETRY_DEADLINE_SECONDS:
+      return False
+    if self._verbose:
+      print(
+          f"  ↻ {reason}; retrying in {delay:.1f}s"
+          f" (attempt {attempt + 1}/{MAX_ATTEMPTS})"
+      )
+    time.sleep(delay)
+    return True
 
   def _get(
       self,
@@ -389,8 +497,9 @@ class AlphaEvolveClient:
       self,
       path: str,
       body: dict[str, typing.Any] | None = None,
+      idempotent: bool = False,
   ) -> dict[str, typing.Any]:
-    return self._request("POST", path, json_body=body)
+    return self._request("POST", path, json_body=body, idempotent=idempotent)
 
   def _delete(self, path: str) -> dict[str, typing.Any]:
     return self._request("DELETE", path)
@@ -655,12 +764,15 @@ class AlphaEvolveClient:
       The acquisition response dictionary.
     """
     path = f"{experiment_name}:acquirePrograms"
+    # The controller re-acquires after any error anyway, so a retry whose first
+    # response was lost strands at most the programs that attempt locked.
     return self._post(
         path,
         {
             "parent": experiment_name,
             "desiredProgramsCount": desired_count,
         },
+        idempotent=True,
     )
 
   # -----------------------------------------------------------------
@@ -692,6 +804,7 @@ class AlphaEvolveClient:
               "parent": experiment_name,
               "evaluationSubmissions": [submission],
           },
+          idempotent=True,
       )
       if resp:
         warnings.warn(
