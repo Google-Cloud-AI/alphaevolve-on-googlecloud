@@ -526,6 +526,23 @@ def _handle_api_error(e: client_module.ApiError) -> None:
   raise typer.Exit(1)
 
 
+# STARTED appears in the backend's resume error while an accepted start or
+# resume waits for a runner; ACTIVE matches the check in `experiment start`.
+_RUNNING_STATES = ("RUNNING", "STARTED", "ACTIVE")
+
+
+def _report_already_running(exp_data: dict[str, Any]) -> None:
+  """Reports that an experiment needs no resume, as a successful no-op."""
+  if _state.json_output:
+    _state.output(exp_data)
+    return
+  state = formatting.clean_state(exp_data.get("state", ""))
+  rich.print(
+      "[green]✓[/green] Experiment is already running (state:"
+      f" [bold]{state}[/bold]); nothing to resume."
+  )
+
+
 def _prepare_program_files_payload(
     file_paths: list[str],
 ) -> list[dict[str, str]]:
@@ -1714,11 +1731,27 @@ def experiment_resume(
         ),
     ],
 ) -> None:
-  """Resume a paused experiment."""
+  """Resume a paused experiment. A no-op if it is already running."""
   try:
     client = _state.get_client()
     exp_name = _resolve_experiment(experiment)
-    result = client.resume_experiment(exp_name)
+
+    exp_data = client.get_experiment(exp_name)
+    if formatting.clean_state(exp_data.get("state", "")) in _RUNNING_STATES:
+      _report_already_running(exp_data)
+      return
+
+    try:
+      result = client.resume_experiment(exp_name)
+    except client_module.ApiError as e:
+      # Another caller resumed it between the GET and the POST.
+      if e.status_code == 400 and any(
+          f"Cannot resume experiment from state {s}" in e.message
+          for s in _RUNNING_STATES
+      ):
+        _report_already_running(client.get_experiment(exp_name))
+        return
+      raise
     op_name = result.get("name", "")
     if not _state.json_output:
       rich.print(
