@@ -180,6 +180,29 @@ def _warn(message: str) -> None:
   typer.echo(message, err=True)
 
 
+def _stdout_is_tty() -> bool:
+  try:
+    return sys.stdout.isatty()
+  except (AttributeError, ValueError):
+    return False
+
+
+def _print_table(tbl: Any) -> None:
+  """Prints a Rich table on a terminal, and TSV when piped or --compact."""
+  if _stdout_is_tty() and not _state.compact:
+    formatting.console.print(tbl)
+  else:
+    print(formatting.table_to_tsv(tbl))
+
+
+def _print_empty(message: str) -> None:
+  """Reports an empty listing without breaking --json or piped stdout."""
+  if _state.json_output:
+    print(json.dumps([]))
+  else:
+    _warn(message)
+
+
 def _err(message: str) -> NoReturn:
   """Writes an error to stderr and exits with a non-zero status."""
   typer.echo(f"Error: {message}", err=True)
@@ -347,17 +370,14 @@ def engine_list() -> None:
     client = _state.get_client()
     engines = list(client.list_engines())
     if not engines:
-      if _state.json_output:
-        print(json.dumps([]))
-      else:
-        rich.print("[dim]No engines found.[/dim]")
+      _print_empty("No engines found.")
       return
 
     if _state.json_output:
       print(json.dumps(engines, indent=2, default=str))
     else:
       cfg = _state.resolve_config()
-      formatting.console.print(
+      _print_table(
           formatting.format_engine_table(engines, active_engine=cfg.engine)
       )
   except client_module.ApiError as e:
@@ -411,20 +431,14 @@ class GlobalState:
     # config.parent raises ValueError when accessed. create_session()
     # builds its own parent URL without the session component.
     if not cfg.has_valid_session():
-      if not _state.json_output:
-        rich.print(
-            "[dim]Session not configured. Creating a new session...[/dim]"
-        )
+      _warn("Session not configured. Creating a new session...")
       try:
         client = client_module.AlphaEvolveClient(cfg, verbose=self.verbose)
         new_session_id = client.create_session()
         cfg.session = new_session_id
         # Persist the new session ID to the active profile.
         config.save_session(cfg.profile_name, new_session_id)
-        if not _state.json_output:
-          rich.print(
-              f"[green]✓[/green] Created session: [bold]{new_session_id}[/bold]"
-          )
+        _warn(f"Created session: {new_session_id}")
       except ValueError as e:
         # Config error (e.g. non-numeric project) — print without the
         # misleading "Error creating session" prefix.
@@ -713,15 +727,12 @@ def _list_experiments_aggregated(
               exp["_session_id"] = s_id
               experiments.append(exp)
           except Exception as e:  # pylint: disable=broad-exception-caught
-            rich.print(
-                f"[dim]DEBUG: list_experiments failed for session {s_id}:"
-                f" {e}[/dim]"
-            )
+            _warn(f"DEBUG: list_experiments failed for session {s_id}: {e}")
             continue
     except client_module.ApiError:
       raise
     except Exception as e:  # pylint: disable=broad-exception-caught
-      rich.print(f"[dim]DEBUG: list_sessions failed: {e}[/dim]")
+      _warn(f"DEBUG: list_sessions failed: {e}")
       return []
 
   # Write to cache (consumed by tab-completion and TUI).
@@ -1581,7 +1592,7 @@ def experiment_list(
       if experiments is not None:
         pass  # use cached
       else:
-        rich.print("[dim]No cache available, fetching…[/dim]")
+        _warn("No cache available, fetching…")
         client = _state.get_client()
         experiments = _list_experiments_aggregated(client, page_size=page_size)
     else:
@@ -1589,7 +1600,7 @@ def experiment_list(
       experiments = _list_experiments_aggregated(client, page_size=page_size)
 
     if not experiments:
-      rich.print("[dim]No experiments found.[/dim]")
+      _print_empty("No experiments found.")
       return
 
     index = nicknames.NicknameIndex()
@@ -1602,9 +1613,7 @@ def experiment_list(
         experiments.sort(key=lambda x: x.get("createTime", ""), reverse=True)
       except (TypeError, AttributeError):
         pass
-      formatting.console.print(
-          formatting.format_experiment_table(experiments, index)
-      )
+      _print_table(formatting.format_experiment_table(experiments, index))
   except client_module.ApiError as e:
     _handle_api_error(e)
 
@@ -2112,31 +2121,40 @@ def program_show(
           pass
     index = nicknames.NicknameIndex()
 
+    content = prog_data.get("content")
+    files = content.get("files", []) if isinstance(content, dict) else []
     if output_file:
-      files = prog_data.get("content", {}).get("files", [])
       if files:
-        if len(files) == 1:
-          content = files[0].get("content", "")
-          with open(output_file, "w", encoding="utf-8") as f:
-            f.write(content)
-          rich.print(f"[green]Saved program code to {output_file}[/green]")
-        else:
-          rich.print(
-              "[yellow]Warning: Program has multiple files. Saving the first"
-              " one.[/yellow]"
-          )
-          content = files[0].get("content", "")
-          with open(output_file, "w", encoding="utf-8") as f:
-            f.write(content)
-          rich.print(f"[green]Saved first file code to {output_file}[/green]")
+        if len(files) > 1:
+          _warn("Warning: Program has multiple files. Saving the first one.")
+        with open(output_file, "w", encoding="utf-8") as f:
+          f.write(files[0].get("content", ""))
+        _warn(f"Saved program code to {output_file}")
       else:
-        rich.print("[red]Error: No file content found in program.[/red]")
+        _err("No file content found in program.")
 
     if _state.json_output:
       print(formatting.to_json(prog_data, "nickname", index))
+    elif code and not _stdout_is_tty():
+      # Piped `--code` output is redirected into files that must stay valid
+      # source, so it gets no banners, highlighting or wrapping.
+      if not files:
+        _err("No file content found in program.")
+      for f in files:
+        if len(files) > 1:
+          sys.stdout.write(f"# --- {f.get('path', 'unknown')} ---\n")
+        content = f.get("content", "")
+        sys.stdout.write(content)
+        if content and not content.endswith("\n"):
+          sys.stdout.write("\n")
+      if insights:
+        for insight in _get_eval_insights(prog_data):
+          if text := insight.get("text", ""):
+            _warn(
+                f"{insight.get('label', 'info')}: {text[:_MAX_INSIGHT_CHARS]}"
+            )
     else:
       if code:
-        files = prog_data.get("content", {}).get("files", [])
         for f in files:
           path = f.get("path", "unknown")
           content = f.get("content", "")
@@ -2202,7 +2220,7 @@ def program_list(
       if programs is not None:
         pass  # use cached
       else:
-        rich.print("[dim]No cache available, fetching…[/dim]")
+        _warn("No cache available, fetching…")
 
     if programs is None:
       programs = list(
@@ -2216,7 +2234,7 @@ def program_list(
       config.save_cache(f"programs_list_{cfg.profile_name}_{exp_id}", programs)
 
     if not programs:
-      rich.print("[dim]No programs found.[/dim]")
+      _print_empty("No programs found.")
       return
     index = nicknames.NicknameIndex()
     index.add_many(programs)
@@ -2224,7 +2242,7 @@ def program_list(
     if _state.json_output:
       print(formatting.to_json(programs, "nickname", index))
     else:
-      formatting.console.print(formatting.format_program_table(programs, index))
+      _print_table(formatting.format_program_table(programs, index))
   except client_module.ApiError as e:
     _handle_api_error(e)
 
@@ -2689,7 +2707,7 @@ def results_failed(
         failed.append(p)
 
     if not failed:
-      rich.print("[dim]No failed programs found.[/dim]")
+      _print_empty("No failed programs found.")
       return
 
     index = nicknames.NicknameIndex()
@@ -2782,7 +2800,7 @@ def results_best(
     all_programs.sort(key=_get_score, reverse=True)
     programs = all_programs[:top]
     if not programs:
-      rich.print("[dim]No scored programs found.[/dim]")
+      _print_empty("No scored programs found.")
       return
     index = nicknames.NicknameIndex()
     index.add_many(programs)
@@ -2790,7 +2808,7 @@ def results_best(
     if _state.json_output:
       print(formatting.to_json(programs, "nickname", index))
     else:
-      formatting.console.print(formatting.format_program_table(programs, index))
+      _print_table(formatting.format_program_table(programs, index))
   except client_module.ApiError as e:
     _handle_api_error(e)
 
@@ -2813,7 +2831,7 @@ def results_history(
     programs = list(client.list_programs(exp_name))
     programs.sort(key=lambda p: p.get("createTime", ""))
     if not programs:
-      rich.print("[dim]No programs found.[/dim]")
+      _print_empty("No programs found.")
       return
     index = nicknames.NicknameIndex()
     index.add_many(programs)
@@ -2821,7 +2839,7 @@ def results_history(
     if _state.json_output:
       print(formatting.to_json(programs, "nickname", index))
     else:
-      formatting.console.print(formatting.format_program_table(programs, index))
+      _print_table(formatting.format_program_table(programs, index))
   except client_module.ApiError as e:
     _handle_api_error(e)
 

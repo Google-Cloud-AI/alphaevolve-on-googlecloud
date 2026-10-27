@@ -505,6 +505,27 @@ def to_json(
   return json.dumps(data, indent=2, default=str)
 
 
+def table_to_tsv(tbl: table.Table) -> str:
+  """Renders a Rich Table as plain tab-separated text, header row first.
+
+  Args:
+    tbl: The table to render; its title and styles are dropped.
+
+  Returns:
+    One line per row with cells joined by tabs, and no trailing newline.
+  """
+
+  def _plain(cell: typing.Any) -> str:
+    return cell.plain if isinstance(cell, text.Text) else str(cell)
+
+  rows = [[_plain(col.header) for col in tbl.columns]]
+  rows.extend(
+      [_plain(cell) for cell in row]
+      for row in zip(*(col.cells for col in tbl.columns))
+  )
+  return "\n".join("\t".join(row) for row in rows)
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
