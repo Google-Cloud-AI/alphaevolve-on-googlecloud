@@ -12,13 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""``ae skills install`` -- deliver the AlphaEvolve skills to a coding assistant.
+"""``ae skills install`` -- deliver the AlphaEvolve skill to a coding assistant.
 
-Copies the six ``alpha_evolve_*`` skill directories from a source -- a local
-checkout, or a GitHub repository fetched as a tarball -- into the skills
-directory of a supported coding assistant. This replaces the standalone
-``setup_ae.py`` installer. Its scope is skill delivery only (a pure file copy);
-it does not install the CLI or any dependencies.
+Copies the ``alpha_evolve`` skill directory from a source -- a local checkout,
+or a GitHub repository fetched as a tarball -- into the skills directory of a
+supported coding assistant, and removes the six former ``alpha_evolve_*`` skill
+directories it replaces. This replaces the standalone ``setup_ae.py``
+installer. Its scope is skill delivery only (a pure file copy); it does not
+install the CLI or any dependencies.
 """
 
 from __future__ import annotations
@@ -38,14 +39,24 @@ import rich
 import rich.markup
 import typer
 
-# The six skill directories this command delivers.
-SKILL_DIRS: tuple[str, ...] = (
+# The skill directories this command delivers.
+SKILL_DIRS: tuple[str, ...] = ("alpha_evolve",)
+
+# Former skills merged into ``alpha_evolve``. Install removes them from the
+# destination, since leaving them would show the agent duplicate AlphaEvolve
+# skills.
+LEGACY_SKILL_DIRS: tuple[str, ...] = (
     "alpha_evolve_experiment_design",
     "alpha_evolve_runner",
     "alpha_evolve_monitor",
     "alpha_evolve_post_experiment",
     "alpha_evolve_orchestrator",
     "alpha_evolve_consultant",
+)
+_PREDATES_MERGE_HINT = (
+    " It holds only the former alpha_evolve_* skills, so it predates the"
+    " merged alpha_evolve skill. Use a newer source: update the checkout, or"
+    " pass --source owner/repo@<ref> with a ref from after the merge."
 )
 
 # Canonical remote source, used when no local checkout is found and no
@@ -93,14 +104,18 @@ def _tool_destinations() -> tuple[tuple[str, pathlib.Path], ...]:
   )
 
 
+def _is_skill_dir(path: pathlib.Path) -> bool:
+  # Require SKILL.md: a bare ``alpha_evolve`` directory is common (e.g. the
+  # AlphaEvolve source tree itself) and must not be mistaken for the skill.
+  return (path / "SKILL.md").is_file()
+
+
 def _has_all_skills(directory: pathlib.Path) -> bool:
-  return directory.is_dir() and all(
-      (directory / name).is_dir() for name in SKILL_DIRS
-  )
+  return all(_is_skill_dir(directory / name) for name in SKILL_DIRS)
 
 
 def _autodetect_local_source() -> pathlib.Path | None:
-  """Search upward from the CWD for a checkout holding all six skill dirs.
+  """Search upward from the CWD for a checkout holding all skill dirs.
 
   A tool's own installed skills directory is skipped, so running from inside
   (say) ``~/.claude/skills`` never picks that as the source -- which would make
@@ -121,9 +136,7 @@ def _autodetect_local_source() -> pathlib.Path | None:
 def _local_skills_root(path: pathlib.Path) -> pathlib.Path | None:
   """Return the dir under ``path`` holding skill dirs (``path`` or ``path/skills``)."""
   for candidate in (path, path / "skills"):
-    if candidate.is_dir() and any(
-        (candidate / name).is_dir() for name in SKILL_DIRS
-    ):
+    if any(_is_skill_dir(candidate / name) for name in SKILL_DIRS):
       return candidate
   return None
 
@@ -165,24 +178,26 @@ def _fetch_tarball(url: str, dest: pathlib.Path) -> None:
     _error(f"Failed to download {url}: {e}")
 
 
-def _is_skill_member(name: str) -> bool:
-  """True for tar members under ``<top>/skills/alpha_evolve_*``."""
+def _is_skill_member(name: str, names: tuple[str, ...] = SKILL_DIRS) -> bool:
+  """True for tar members under ``<top>/skills/<one of names>``."""
   parts = name.split("/")
-  return (
-      len(parts) >= 3
-      and parts[1] == "skills"
-      and parts[2].startswith("alpha_evolve_")
-  )
+  return len(parts) >= 3 and parts[1] == "skills" and parts[2] in names
 
 
 def _extract_skills(tarball: pathlib.Path, into: pathlib.Path) -> pathlib.Path:
-  """Extract only the ``skills/alpha_evolve_*`` subtree; return its root dir."""
+  """Extract only the ``skills/<skill dir>`` subtrees; return their root dir."""
   try:
     with tarfile.open(tarball, "r:gz") as tar:
       members = [m for m in tar.getmembers() if _is_skill_member(m.name)]
       if not members:
+        legacy = any(
+            _is_skill_member(m.name, LEGACY_SKILL_DIRS)
+            for m in tar.getmembers()
+        )
         _error(
-            "Downloaded archive contains no skills/alpha_evolve_* directories."
+            "Downloaded archive contains no AlphaEvolve skill directory under"
+            " skills/."
+            + (_PREDATES_MERGE_HINT if legacy else "")
         )
       # filter="data" applies the stdlib path-traversal guard even though the
       # origin is trusted.
@@ -242,7 +257,15 @@ def _resolve_source(
   if candidate.exists():
     root = _local_skills_root(candidate)
     if root is None:
-      _error(f"No AlphaEvolve skill directories found under {candidate}.")
+      legacy_paths = [candidate / name for name in LEGACY_SKILL_DIRS]
+      legacy_paths += [
+          candidate / "skills" / name for name in LEGACY_SKILL_DIRS
+      ]
+      legacy = any(path.is_dir() for path in legacy_paths)
+      _error(
+          f"No AlphaEvolve skill directories found under {candidate}."
+          + (_PREDATES_MERGE_HINT if legacy else "")
+      )
     return root, None, f"local path {root}"
 
   owner_repo, ref = _parse_remote(source)
@@ -309,13 +332,15 @@ def _copy_skills(
 
   Staging every skill first makes the copy phase safe: a failure while copying
   leaves the destination untouched. The final swap is a per-directory rename
-  (fast, but not all-or-nothing across the six), and each installed skill
-  replaces the entire existing directory of that name.
+  (fast, but not all-or-nothing across several skills), and each installed
+  skill replaces the entire existing directory of that name. The legacy skill
+  dirs are removed only after the new skills are in place.
 
   Args:
-    skills_root: Directory containing the six skill dirs to install.
+    skills_root: Directory containing the skill dirs to install.
     dest: Destination skills directory.
-    force: If True, replace existing skills without prompting.
+    force: If True, replace existing skills and remove legacy ones without
+      prompting.
   """
   if _same_dir(skills_root, dest):
     _error(
@@ -324,10 +349,22 @@ def _copy_skills(
     )
 
   existing = [name for name in SKILL_DIRS if (dest / name).exists()]
-  if existing and not force:
+  legacy = [
+      name
+      for name in LEGACY_SKILL_DIRS
+      if (dest / name).exists() or (dest / name).is_symlink()
+  ]
+  if (existing or legacy) and not force:
+    changes = []
+    if existing:
+      changes.append(f"{len(existing)} skill(s) will be replaced")
+    if legacy:
+      changes.append(
+          f"{len(legacy)} former AlphaEvolve skill(s) will be removed"
+          f" ({', '.join(legacy)})"
+      )
     if not typer.confirm(
-        f"{len(existing)} skill(s) already exist in {dest} and will be"
-        " replaced. Continue?",
+        f"In {dest}, {' and '.join(changes)}. Continue?",
         default=True,
     ):
       rich.print("Aborted; nothing was changed.")
@@ -351,6 +388,16 @@ def _copy_skills(
   finally:
     shutil.rmtree(staging, ignore_errors=True)
 
+  for name in legacy:
+    try:
+      _remove_path(dest / name)
+    except OSError as e:
+      _error(
+          "Installed the new skill, but failed to remove the former skill"
+          f" {dest / name}: {e}. Remove it by hand."
+      )
+    rich.print(f"[green]Removed former skill[/green] {name}")
+
 
 @skills_app.command("install")
 def install(
@@ -358,8 +405,8 @@ def install(
         None,
         "--source",
         help=(
-            "Local path (a dir with the alpha_evolve_* dirs, or a repo root"
-            " with a skills/ subdir) OR a remote GitHub source"
+            "Local path (a dir holding the alpha_evolve skill dir, or a repo"
+            " root with a skills/ subdir) OR a remote GitHub source"
             " (https://github.com/owner/repo, git+..., or owner/repo[@ref])."
             " Defaults to a local checkout, else the canonical GitHub repo."
         ),
@@ -378,22 +425,30 @@ def install(
         help="Explicit destination directory (overrides --tool).",
     ),
     force: bool = typer.Option(
-        False, "--force", help="Overwrite existing skills without prompting."
+        False,
+        "--force",
+        help=(
+            "Overwrite existing skills and remove the former alpha_evolve_*"
+            " skills without prompting."
+        ),
     ),
 ) -> None:
-  """Install the AlphaEvolve skills into a coding assistant."""
+  """Install the AlphaEvolve skill into a coding assistant."""
   skills_root, cleanup, description = _resolve_source(source)
   try:
     rich.print(f"Source: [bold]{rich.markup.escape(description)}[/bold]")
-    missing = [name for name in SKILL_DIRS if not (skills_root / name).is_dir()]
+    missing = [
+        name for name in SKILL_DIRS if not _is_skill_dir(skills_root / name)
+    ]
     if missing:
       _error(f"Source is missing skill directories: {', '.join(missing)}.")
 
     destination = _resolve_destination(tool, dest)
     _copy_skills(skills_root, destination, force)
     rich.print(
-        f"\n[green]Done.[/green] Installed {len(SKILL_DIRS)} skills to"
-        f" {rich.markup.escape(str(destination))}."
+        f"\n[green]Done.[/green] Installed {', '.join(SKILL_DIRS)} to"
+        f" {rich.markup.escape(str(destination))}. Restart your coding"
+        " assistant to load it."
     )
   finally:
     if cleanup is not None:
