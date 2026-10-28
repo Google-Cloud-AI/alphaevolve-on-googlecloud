@@ -35,6 +35,28 @@ import google.auth.transport.requests
 import requests
 
 from . import config
+from . import version
+
+
+def detect_origin() -> str:
+  """Returns where this CLI process was started from.
+
+  Antigravity sets ANTIGRAVITY_AGENT=1 on every shell command it runs.
+  """
+  if os.environ.get("ANTIGRAVITY_AGENT") == "1":
+    return "antigravity"
+  return "cli"
+
+
+def client_info() -> str:
+  """Returns the product token sent as User-Agent and x-goog-api-client.
+
+  The server uses the origin token to count experiments by where they were
+  started. The token carries no user content or identifiers, so the
+  Antigravity trajectory and conversation IDs are not sent.
+  """
+  return f"ae-cli/{version.__version__} origin/{detect_origin()}"
+
 
 # Retry policy for transient failures: gateway errors, rate limits and dropped
 # connections. Backoff doubles from INITIAL_BACKOFF_SECONDS with jitter, no
@@ -326,14 +348,17 @@ class AlphaEvolveClient:
       self._credentials.refresh(self._auth_request)
 
   def _headers(self) -> dict[str, str]:
-    """Build request headers with auth + quota attribution."""
+    """Build request headers with auth, quota and origin attribution."""
     self._refresh_credentials()
     token = self._static_token or (
         self._credentials.token if self._credentials is not None else ""
     )
+    info = client_info()
     headers = {
         "Authorization": f"Bearer {token}",
         "Content-Type": "application/json",
+        "User-Agent": info,
+        "x-goog-api-client": info,
     }
     project = self._config.project or self._gcp_project
     if project:
