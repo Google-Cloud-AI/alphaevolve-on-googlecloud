@@ -31,6 +31,7 @@ import uuid
 import warnings
 
 import google.auth
+import google.auth.exceptions
 import google.auth.transport.requests
 import requests
 
@@ -161,9 +162,16 @@ class AlphaEvolveClient:
       self._gcp_project = cfg.project
       self._auth_request = None
     else:
-      self._credentials, self._gcp_project = google.auth.default(
-          scopes=["https://www.googleapis.com/auth/cloud-platform"],
-      )
+      try:
+        self._credentials, self._gcp_project = google.auth.default(
+            scopes=["https://www.googleapis.com/auth/cloud-platform"],
+        )
+      except google.auth.exceptions.DefaultCredentialsError as e:
+        raise google.auth.exceptions.DefaultCredentialsError(
+            f"{e}\nAlphaEvolve found no credentials. Run `gcloud auth"
+            " application-default login`, or set ALPHAEVOLVE_ACCESS_TOKEN to"
+            " an OAuth2 access token."
+        ) from e
       self._auth_request = google.auth.transport.requests.Request()
     self._resolved_session = None  # Cache for resolved session ID
 
