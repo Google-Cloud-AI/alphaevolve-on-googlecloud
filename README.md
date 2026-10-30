@@ -50,7 +50,7 @@ cloud infrastructure beyond the AlphaEvolve API. It's the fastest way to see the
 - Python **3.9+**, [`uv`](https://docs.astral.sh/uv/), and the [`gcloud` CLI](https://cloud.google.com/sdk/docs/install)
 - A Google Cloud project with **AlphaEvolve provisioned** (this gives you a Gemini Enterprise
   **App / Engine ID**). Follow the
-  [Install and configure](https://docs.cloud.google.com/gemini/enterprise/docs/alphaevolve/developer-guide/get-started)
+  [Install and configure](https://docs.cloud.google.com/gemini/enterprise/docs/alphaevolve/developer-guide/environment-and-api-access-setup)
   guide once, then reuse it for every example.
 
 ### Run it
