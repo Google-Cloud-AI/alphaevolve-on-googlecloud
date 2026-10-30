@@ -73,12 +73,22 @@ installed?"
 Before making any claims about network access, verify connectivity:
 
 ```bash
-curl -s -o /dev/null -w "%{http_code}" https://discoveryengine.googleapis.com
+ae --json config test
 ```
 
-If this returns any HTTP status code (200, 404, etc.), you have network access.
-**NEVER claim you lack internet access without running this check.** Only if
-`curl` fails with a connection error should you report network issues.
+This calls the AlphaEvolve API with the configured project. Read the result:
+
+-   **Success, or an HTTP error** printed as `[<status>] <message>` (for example
+    `[403] ...`): you have network access. Fix any error as described in Step
+    1.3.
+-   **A connection error** (DNS failure, connection refused, timeout): this is
+    the only result that means a network problem.
+-   **Any other error**, such as missing credentials, an invalid project, or no
+    project configured: this is configuration, not network, even when it is
+    printed under `Connection Failed`. Configure `ae` first (Stage 1) and run
+    the check again.
+
+**NEVER claim you lack internet access without running this check.**
 
 **After installing or updating the CLI or skills, restart the agent session.**
 Most agent runtimes cache skill files for the duration of a session. Changes
