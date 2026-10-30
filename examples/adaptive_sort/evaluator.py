@@ -23,7 +23,11 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+from alpha_evolve import scoring
+
 logger = logging.getLogger(__name__)
+
+PRIMARY_METRIC = "score"
 
 # Environment variable for the Cloud Function URL
 EVALUATOR_URL = os.getenv("EVALUATOR_URL")
@@ -57,10 +61,7 @@ def adaptive_sort_evaluation(program_candidate) -> dict:
     # Extract code from the candidate
     files = program_candidate.get("content", {}).get("files", [])
     if not files:
-        return {
-            "scores": {"scores": []},
-            "artifacts": {"error": "No files in candidate"},
-        }
+        return _failure("No files in candidate")
 
     # We send the list of files directly to the Cloud Function
     payload = {
@@ -110,52 +111,87 @@ def adaptive_sort_evaluation(program_candidate) -> dict:
             if "error" in result_json:
                 # Check if it is a top-level error
                 if "metrics" not in result_json and "artifacts" not in result_json:
-                    return {
-                        "scores": {"scores": []},
-                        "artifacts": {"error": result_json["error"]},
-                    }
+                    return _infra_failure(result_json["error"])
 
             # Convert metrics to the expected list format
             metrics_dict = result_json.get("metrics", {})
             logger.debug(f"metrics_dict keys: {list(metrics_dict.keys())}")
-            logger.debug(
-                f"metrics_dict sample val type: {type(list(metrics_dict.values())[0]) if metrics_dict else 'Empty'}"
-            )
 
-            scores_list = []
+            scores = {}
             for k, v in metrics_dict.items():
                 try:
-                    val = float(v) if v is not None else 0.0
-                    scores_list.append({"metric": k, "score": val})
-                except Exception as e:
+                    scores[k] = (
+                        scoring.finite_score(float(v), k)
+                        if v is not None
+                        else scoring.hard_penalty()
+                    )
+                except (TypeError, ValueError) as e:
                     logger.error(f"converting metric {k} with value {v}: {e}")
-                    # If we can't convert, skip or handle?
-                    # For now, let's include it as 0.0 but log error to see what's happening
-                    scores_list.append({"metric": k, "score": 0.0})
+                    scores[k] = scoring.hard_penalty()
 
-            # Simplify return to flat dict as expected by AlphaEvolveExperiment
-            flat_metrics = {}
-            for k, v in metrics_dict.items():
-                try:
-                    flat_metrics[k] = float(v) if v is not None else 0.0
-                except Exception:
-                    flat_metrics[k] = 0.0
-
-            return flat_metrics
+            return scoring.build_evaluation(scores, _build_insights(result_json))
 
     except urllib.error.HTTPError as e:
         err_content = e.read().decode("utf-8")
-        return {
-            "scores": {"scores": []},
-            "artifacts": {"error": f"HTTP Error {e.code}: {err_content}"},
-        }
+        return _infra_failure(f"HTTP Error {e.code}: {err_content}")
     except urllib.error.URLError as e:
-        return {
-            "scores": {"scores": []},
-            "artifacts": {"error": f"URL Error: {e.reason}"},
-        }
+        return _infra_failure(f"URL Error: {e.reason}")
     except Exception as e:
-        return {
-            "scores": {"scores": []},
-            "artifacts": {"error": f"Client exception: {str(e)}"},
-        }
+        return _infra_failure(f"Client exception: {str(e)}")
+
+
+def _build_insights(result_json: dict) -> list:
+    """Surface the service's build and run output to the evolution prompt.
+
+    The Cloud Function returns compiler stderr, stdout and error text under an ``artifacts``
+    key, which ``workers.py`` drops when it filters a submission to scores and insights. Those
+    same strings are re-emitted here as insights so the model can actually see why a candidate
+    failed to compile.
+
+    Args:
+        result_json: The decoded Cloud Function response.
+
+    Returns:
+        Insights for every non-empty artifact, in a stable order.
+    """
+    artifacts = result_json.get("artifacts") or {}
+    insights = []
+    for label in ("error", "stderr", "stdout", "build_output"):
+        text = artifacts.get(label)
+        if text:
+            insights.append(scoring.insight(label, str(text)))
+    return insights
+
+
+def _failure(reason: str) -> dict:
+    """Build an evaluation for a candidate that could not be evaluated on its own merits.
+
+    Args:
+        reason: What went wrong, forwarded to the evolution prompt.
+
+    Returns:
+        An evaluation carrying a hard penalty on the primary metric and one insight.
+    """
+    logger.error("Evaluation failed: %s", reason)
+    return scoring.build_evaluation(
+        {PRIMARY_METRIC: scoring.hard_penalty()}, [scoring.insight("error", reason)]
+    )
+
+
+def _infra_failure(reason: str) -> dict:
+    """Build an evaluation for a failure on our side of the fence.
+
+    An unreachable service, an HTTP error, or a client-side exception says nothing about the
+    candidate, so it is left unscored rather than penalized. Penalizing here would teach the
+    search to avoid perfectly good candidates whenever the evaluator flakes.
+
+    Args:
+        reason: What went wrong, forwarded to the evolution prompt.
+
+    Returns:
+        An evaluation with the primary metric unscored and one insight.
+    """
+    logger.error("Evaluator unavailable: %s", reason)
+    return scoring.build_evaluation(
+        {PRIMARY_METRIC: None}, [scoring.insight("evaluator_error", reason)]
+    )

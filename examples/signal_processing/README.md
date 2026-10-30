@@ -33,14 +33,41 @@ flowchart TB
 
 ## Metrics
 
+The evaluator submits **all 14 of the following** as metrics, averaged across the 5 test
+signals.
+
 | Metric | Description |
 |--------|-------------|
 | `overall_score` | **Primary.** Weighted combination of composite, smoothness, accuracy, noise reduction, and reliability. Higher is better. |
+
+**Quality** — higher is better:
+
+| Metric | Description |
+|--------|-------------|
 | `composite_score` | J(theta) multi-objective optimization function. |
-| `correlation` | Pearson correlation with ground truth clean signal. |
-| `noise_reduction` | SNR improvement over raw noisy input. |
-| `slope_changes` | Directional reversals in filtered signal (lower is better). |
+| `correlation` | Pearson correlation with the ground-truth clean signal. |
+| `accuracy_score` | Correlation clamped to be non-negative. |
+| `noise_reduction` | SNR improvement over the raw noisy input. |
+| `smoothness_score` | Derived from the slope-change count. |
+| `responsiveness_score` | Derived from the instantaneous lag error. |
+| `efficiency_score` | Derived from execution time. |
 | `success_rate` | Fraction of test signals processed successfully. |
+
+**Diagnostic** — these are quantities where *lower is genuinely better*, but they are currently
+submitted as metrics rather than insights. Since AlphaEvolve maximizes every metric it is
+given, treat them as reported diagnostics rather than optimization targets:
+
+| Metric | Description |
+|--------|-------------|
+| `slope_changes` | Directional reversals in the filtered signal. |
+| `lag_error` | Instantaneous lag error at the most recent sample. |
+| `avg_error` | Mean absolute tracking error across the window. |
+| `false_reversals` | Trend changes not present in the clean signal. |
+| `execution_time` | Mean wall-clock seconds per signal. |
+
+A candidate that fails to run, omits `process_signal`, or fails on every test signal is
+scored `-1e9` rather than left unscored — see the
+[scoring convention](../../README.md#scoring-convention).
 
 ### Multi-objective optimization function
 
