@@ -1,18 +1,20 @@
 # AlphaEvolve Skills
 
 ## Overview
-The AlphaEvolve skills allow you to run AlphaEvolve experiments directly from an agentic coding assistant (e.g. Antigravity). Using these skills, your coding assistant will guide you through the entire AlphaEvolve workflow, including configuring the experiment, running the evolutionary loop, building monitoring and observability reporting, and integrating the best result back into your code.
+The AlphaEvolve skill allows you to run AlphaEvolve experiments directly from an agentic coding assistant (e.g. Antigravity). Using this skill, your coding assistant will guide you through the entire AlphaEvolve workflow, including configuring the experiment, running the evolutionary loop, building monitoring and observability reporting, and integrating the best result back into your code.
 
-There are 6 AlphaEvolve skills included, with README.md and SKILLS.md files provided for each skill.
+Everything ships as one skill, [`alpha_evolve`](alpha_evolve/). Only its `SKILL.md` is loaded when the skill triggers; it picks the phase that matches your request and reads that phase's guide on demand. See [`alpha_evolve/README.md`](alpha_evolve/README.md) for the file layout.
 
-| Skill | Description |
+| Phase | What it does |
 | --- | --- |
-| [`alpha_evolve_experiment_design`](alpha_evolve_experiment_design/) | Scaffolds experiments. Handles problem definition, initial seed program, and evaluator generation via a rigorous test-driven workflow. |
-| [`alpha_evolve_runner`](alpha_evolve_runner/) | Validates evaluator connectivity, configures backend requirements, and launches the experiment using the `ae` CLI. |
-| [`alpha_evolve_monitor`](alpha_evolve_monitor/) | Monitors running experiments, manages the local evaluation control loop, and provides periodic live progress reports. |
-| [`alpha_evolve_post_experiment`](alpha_evolve_post_experiment/) | Analyzes completed runs, produces visual reports (charts/metrics), and seamlessly integrates the best evolved code back into your codebase. |
-| [`alpha_evolve_orchestrator`](alpha_evolve_orchestrator/) | The master workflow skill. Automatically detects the current phase of the experiment and chains the Design, Runner, and Monitor skills for an end-to-end experience. |
-| [`alpha_evolve_consultant`](alpha_evolve_consultant/) | A read-only advisory skill. Answers questions on experiment design, best practices, and troubleshooting based strictly on the expert reference guide. |
+| Consultant | Read-only. Answers questions on fit, experiment design, best practices, and troubleshooting, based strictly on the expert reference guide. |
+| Setup | Installs and finds the `ae` CLI, checks credentials and the Gemini Enterprise license, and configures `ae`. |
+| Design | Scaffolds experiments: problem definition, initial seed program, and evaluator, via a test-driven workflow. |
+| Runner | Validates the evaluator, configures the backend, and launches the experiment with the `ae` CLI. |
+| Monitor | Runs the local evaluation control loop and gives periodic live progress reports. |
+| Post-experiment | Analyzes completed runs, produces visual reports, and integrates the best evolved code back into your codebase. |
+
+The skill detects where you are and chains the phases end to end. It replaces the six skills of earlier versions (`alpha_evolve_consultant`, `alpha_evolve_experiment_design`, `alpha_evolve_monitor`, `alpha_evolve_orchestrator`, `alpha_evolve_post_experiment`, `alpha_evolve_runner`).
 
 Important limitations of this version:
 
@@ -44,9 +46,11 @@ uv --version
 
 4. A [Google Cloud Platform (GCP)](https://docs.cloud.google.com/resource-manager/docs/creating-managing-projects) project needs to be created / provisioned with the billing account configured, and a [Gemini Enterprise Engine](https://docs.cloud.google.com/gemini/enterprise/docs/quickstart-gemini-enterprise) created.
 
+5. You need an active Gemini Enterprise license assigned to you in that project. Any Gemini Enterprise tier grants access, including a trial license. Without one, creating an experiment fails with `LICENSE_WITHOUT_SUBSCRIPTION_TIER`.
+
 ## Setup
 
-Setup has two steps: install the `ae` CLI (required by the skills), then install the skills into your coding assistant. Both pull directly from the AlphaEvolve repo, so **cloning is optional** — a local clone is only needed if you want to install the skills from an offline source (see step 2).
+Setup has two steps: install the `ae` CLI (required by the skill), then install the skill into your coding assistant. Both pull directly from the AlphaEvolve repo, so **cloning is optional** — a local clone is only needed if you want to install the skill from an offline source (see step 2).
 
 1. Install the `ae` CLI from source. Since `uv` is already a prerequisite, install it straight from the repo without cloning:
 
@@ -55,7 +59,8 @@ uv tool install "git+https://github.com/Google-Cloud-AI/alphaevolve-on-googleclo
 ```
 
    * `uv` is recommended — it's already a prerequisite and installs `ae` in isolation on your PATH; `pipx` does the same, and plain `pip` works inside an active virtualenv.
-   * `#subdirectory=skills` installs the `ae` CLI **only**; the 6 AlphaEvolve skills are installed separately in step 2.
+   * `#subdirectory=skills` installs the `ae` CLI **only**; the AlphaEvolve skill is installed separately in step 2.
+   * If you installed `ae` before the skills were merged into one, upgrade it first with `uv tool upgrade ae-cli`. Older versions of `ae skills install` look for the six former skill directories and fail.
 
 **Tip:** You can verify the installation of the `ae` CLI by running:
 
@@ -64,34 +69,29 @@ uv tool install "git+https://github.com/Google-Cloud-AI/alphaevolve-on-googleclo
 ae version
 ```
 
-2. Install the skills into your coding assistant:
+2. Install the skill into your coding assistant:
 
 ```shell
 ae skills install
 ```
 
-   * With no arguments, this auto-detects a local checkout (a directory holding the six `alpha_evolve_*` dirs, or a repo root with a `skills/` subdirectory), and otherwise fetches the skills from the GitHub repo (`Google-Cloud-AI/alphaevolve-on-googlecloud`, ref `main`).
+   * With no arguments, this auto-detects a local checkout (a directory holding the `alpha_evolve` skill directory, or a repo root with a `skills/` subdirectory), and otherwise fetches the skill from the GitHub repo (`Google-Cloud-AI/alphaevolve-on-googlecloud`, ref `main`).
    * It then shows a menu to choose the destination coding assistant (Gemini CLI, Antigravity, Claude Code, or OpenAI Codex) or a custom path.
+   * It also removes the six former `alpha_evolve_*` skill directories from the destination, after asking (or without asking, with `--force`).
 
 ## Usage
 
 ### Getting Started
 
-1. Open your coding agent/assistant. Confirm the AlphaEvolve skills have been loaded by submitting the below prompt. 
+1. Open your coding agent/assistant. Confirm the AlphaEvolve skill has been loaded by submitting the below prompt. 
 
 ```
 List all skills that are readily available without using another tool or skill
 ```
 
-2. Confirm the following 6 AlphaEvolve skills are returned: 
-   1. alpha_evolve_consultant
-   2. alpha_evolve_experiment_design
-   3. alpha_evolve_monitor
-   4. alpha_evolve_orchestrator
-   5. alpha_evolve_post_experiment
-   6. alpha_evolve_runner
-3. Review the individual README.md and SKILL.md files for each skill to learn about what each one does.
-4. Now you're ready to leverage the AlphaEvolve skills for the end-to-end implementation of AlphaEvolve. 
+2. Confirm that the `alpha-evolve` skill is returned, and that none of the six former `alpha_evolve_*` skills are.
+3. Review [`alpha_evolve/README.md`](alpha_evolve/README.md) and [`alpha_evolve/SKILL.md`](alpha_evolve/SKILL.md) to learn what the skill does.
+4. Now you're ready to leverage the AlphaEvolve skill for the end-to-end implementation of AlphaEvolve. 
    1. We recommend using Gemini 3.5 Flash for the coding assistant. 
 
 Now it's time to get started with executing your first experiment with AlphaEvolve!
