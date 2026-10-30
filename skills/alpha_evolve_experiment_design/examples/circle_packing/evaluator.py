@@ -20,6 +20,9 @@ logger = logging.getLogger(__name__)
 
 EVALUATION_METRIC = "sum_of_radii"
 EVALUATION_INPUTS = {"n": 26}
+# Iterative numerical optimization (e.g., multi-start Basin-Hopping + SLSQP/LP)
+# requires several minutes per candidate to escape local jamming basins.
+DEFAULT_TIMEOUT_SECONDS = 600
 
 
 class EvaluationTimeoutError(Exception):
@@ -70,7 +73,9 @@ def _solution_diagnostics(
   return insights
 
 
-def evaluate_program(code: str, timeout_seconds: int = 30) -> dict[str, Any]:
+def evaluate_program(
+    code: str, timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS
+) -> dict[str, Any]:
   """Execute candidate code and return the evaluation result.
 
   Args:
@@ -188,12 +193,18 @@ def main():
       action="append",
       help="Path to a program file to evaluate (repeatable).",
   )
+  parser.add_argument(
+      "--timeout",
+      type=int,
+      default=DEFAULT_TIMEOUT_SECONDS,
+      help="Max seconds before the evaluation is killed.",
+  )
   args = parser.parse_args()
 
   with open(args.input_program_file[0]) as f:
     code = f.read()
 
-  result = evaluate_program(code)
+  result = evaluate_program(code, timeout_seconds=args.timeout)
 
   with open(args.output_file, "w") as f:
     json.dump(result, f)
