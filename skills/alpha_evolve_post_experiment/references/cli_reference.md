@@ -153,12 +153,12 @@ ae --json program evaluate \
   --backend local
 ```
 
-| Flag | Required | Default | Description |
-|------|----------|---------|-------------|
-| `--program-file` | Yes | - | Path to the program file to evaluate |
-| `--evaluator` | Yes | - | Path to the evaluator script |
-| `--backend` | No | `local` | `local` or `podman` |
-| `--timeout` | No | 60 | Max evaluation time in seconds |
+Flag             | Required | Default | Description
+---------------- | -------- | ------- | -----------
+`--program-file` | Yes      | -       | Path to the program file to evaluate
+`--evaluator`    | Yes      | -       | Path to the evaluator script
+`--backend`      | No       | `local` | `local` (`podman` is not implemented yet)
+`--timeout`      | No       | 60      | Max evaluation time in seconds
 
 ## Visualization Commands
 

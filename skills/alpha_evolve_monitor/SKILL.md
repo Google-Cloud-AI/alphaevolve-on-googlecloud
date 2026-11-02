@@ -206,7 +206,8 @@ the full content every cycle.
     user wants to limit evaluations.
 -   The `--timeout` flag is the **per-evaluation timeout** in seconds (default
     60). Increase if evaluations are slow.
--   The `--backend` flag can be `local` (default) or `podman` (containerized).
+-   The `--backend` flag defaults to `local`. The `podman` backend is not
+    implemented yet.
 
 ### Step 2.3: Monitor progress
 
@@ -423,22 +424,14 @@ applied.
 
 Common error patterns:
 
-| Error                  | Likely Cause             | Fix                    |
-| ---------------------- | ------------------------ | ---------------------- |
-| "experiment not found" | Wrong nickname/ID        | Run `ae --json         |
-:                        :                          : experiment list`       :
-| 404                    | Wrong experiment name or | Verify with `ae --json |
-:                        : project                  : config show`           :
-| 403                    | Missing permissions      | User needs Discovery   |
-:                        :                          : Engine Editor role     :
-| "evaluation failed"    | Evaluator bug or missing | Debug locally or try   |
-:                        : deps                     : `--backend podman`     :
-| Control loop exits     | No programs available    | Wait and retry -- the  |
-: immediately            : yet                      : backend may still be   :
-:                        :                          : generating             :
-| "quota exceeded"       | Project quota limit      | Delete old experiments |
-:                        :                          : or request quota       :
-:                        :                          : increase               :
+Error                          | Likely Cause                     | Fix
+------------------------------ | -------------------------------- | ---
+"experiment not found"         | Wrong nickname/ID                | Run `ae --json experiment list`
+404                            | Wrong experiment name or project | Verify with `ae --json config show`
+403                            | Missing permissions              | User needs Discovery Engine Editor role
+"evaluation failed"            | Evaluator bug or missing deps    | Debug locally; add deps with `uv tool install --with`
+Control loop exits immediately | No programs available yet        | Wait and retry -- the backend may still be generating
+"quota exceeded"               | Project quota limit              | Delete old experiments or request quota increase
 
 --------------------------------------------------------------------------------
 

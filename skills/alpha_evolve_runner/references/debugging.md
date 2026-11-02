@@ -76,20 +76,23 @@ gcloud auth application-default login
 
 ### "ae program evaluate" fails with ImportError
 
-**Cause:** The evaluator or program has Python dependencies not available in
-the local environment.
+**Cause:** The evaluator or program has Python dependencies not available in the
+local environment. The local backend runs evaluations with the Python that runs
+`ae` itself, not the experiment's `uv` project, so `uv add` in the experiment
+directory does not help.
 
-**Fix (Option A):** Install missing dependencies:
-
-```bash
-pip install <missing_package>
-```
-
-**Fix (Option B):** Switch to podman backend (provides isolated environment):
+**Fix:** Install the missing packages into the `ae` environment. For a `uv` tool
+install (the default), list every package the experiment needs, because
+`--reinstall` replaces the previous set:
 
 ```bash
-ae --json program evaluate --program-file <prog> --evaluator <eval> --backend podman
+uv tool install --reinstall --with scipy "git+https://github.com/Google-Cloud-AI/alphaevolve-on-googlecloud.git#subdirectory=skills"
 ```
+
+If `ae` was installed with `pip` into a virtualenv, run
+`pip install <missing_package>` in that virtualenv. Also name the allowed
+packages in `problem_description.md`, so evolved programs do not import others
+that the environment lacks.
 
 ### ImportError for installed packages (e.g., numpy) when using wrapper scripts
 
@@ -140,7 +143,6 @@ computation.
 1. Add a timeout to the evaluation: check `ae program evaluate --help` for
    timeout flags
 2. Review the program for infinite loops
-3. Consider using podman backend which has built-in resource limits
 
 ## Model Selection Issues
 
