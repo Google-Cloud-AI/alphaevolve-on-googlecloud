@@ -92,6 +92,7 @@ alpha_evolve_post_experiment/
   SKILL.md                        # Main skill instructions (4 stages)
   references/
     cli_reference.md              # ae CLI commands for post-experiment
+    code_integration.md           # Stage 4: applying the evolved code
     integration_patterns.md       # Code integration modes and patterns
     visualization.md              # Chart generation (matplotlib + HTML)
     debugging.md                  # Troubleshooting guide

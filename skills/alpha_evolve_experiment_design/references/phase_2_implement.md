@@ -50,6 +50,25 @@ cd project_dir && uv sync
 
 This creates the virtual environment and installs dependencies.
 
+> **The local backend does not use this environment.** `ae program evaluate` and
+> `ae experiment run` with `--backend local` run the evaluator, and every
+> evolved program, with the Python that runs `ae` itself. For a `uv` tool
+> install that is the tool's own isolated environment. Do two things:
+>
+> 1.  Install each third-party dependency there too:
+>
+>     ```bash
+>     uv tool install --reinstall --with scipy "git+https://github.com/Google-Cloud-AI/alphaevolve-on-googlecloud.git#subdirectory=skills"
+>     ```
+>
+>     Repeat `--with <package>` for each dependency, since `--reinstall`
+>     replaces the previous set.
+>
+> 2.  Name the packages in `problem_description.md` as the only third-party
+>     imports allowed. Without that, the LLM often imports packages such as
+>     `scipy` that the environment lacks, and those programs fail with
+>     `No module named '<package>'`.
+
 ---
 
 ### Step 2: `test_program.py`
@@ -144,6 +163,7 @@ For each entry in `source_files`:
 codebase. See the **Provenance Tracking** section below.
 
 **Multi-file rules:**
+
 1. `initial_program.py` imports from context files. Context files must NOT
    import back from `initial_program.py` -- it is exec'd, not imported.
 2. All files are placed **flat in one directory**. Use `import <filename>`
@@ -153,17 +173,19 @@ codebase. See the **Provenance Tracking** section below.
    modified by evolution. Context files are preserved unchanged.
 
 **Rules (all modes):**
+
 1. `EVOLVE-BLOCK-START` / `EVOLVE-BLOCK-END` markers on their own lines.
 2. `evaluate()` is **outside** the evolve block — its interface is fixed.
 3. The solve/core function is **inside** the evolve block.
-4. Program files must be **self-contained as a group** — they must not
-   import from the user's source tree or any path outside the experiment
-   directory. The `ae` CLI copies files to a temp directory for evaluation.
-   Only stdlib, `pyproject.toml` dependencies, and other bundled program
-   files are available.
+4.  Program files must be **self-contained as a group** — they must not import
+    from the user's source tree or any path outside the experiment directory.
+    The `ae` CLI copies files to a temp directory for evaluation. Only stdlib,
+    packages installed in the `ae` environment (Step 1), and other bundled
+    program files are available. `pyproject.toml` dependencies are not.
 5. If `desc.source_code` is set, use it as the initial evolve block content.
 
 **Verify:**
+
 ```bash
 uv run python -c "import ast; ast.parse(open('initial_program.py').read())"
 uv run pytest test_program.py -v
@@ -261,11 +283,14 @@ or floating-point arithmetic, also read
 
 > **IMPORTANT:** The evaluator must be a **CLI-compatible script** that works
 > with the `ae` CLI. The `ae` CLI calls it as:
+>
 > ```
 > python evaluator.py --output-file /path/to/scores.json --program-dir <workspace>
 > ```
-> The `--program-dir` flag points to the directory containing `initial_program.py`
-> and any context files. The evaluator reads and exec's `initial_program.py`.
+>
+> The `--program-dir` flag points to the directory containing
+> `initial_program.py` and any context files. The evaluator reads and exec's
+> `initial_program.py`.
 
 **Contract:**
 
@@ -337,6 +362,7 @@ The file must be runnable as a script (`if __name__ == "__main__": main()`).
     with an error insight for non-finite values
 
 **Verify:**
+
 ```bash
 uv run python -c "import ast; ast.parse(open('evaluator.py').read())"
 uv run pytest test_evaluator.py -v
@@ -389,6 +415,12 @@ constraint equations}
 - **Strategy:** {desc.evaluation_strategy description}
 - **Inputs:** {desc.eval_inputs explained}
 
+## Allowed Imports
+
+Only the standard library, the experiment's other program files, and these
+third-party packages may be imported: {desc.allowed_imports}. Do not import any
+other package, including {desc.forbidden_imports}.
+
 ## Solution Guidance
 
 {Hints about known approaches, what makes a good solution, common
@@ -438,6 +470,7 @@ survive evolution unchanged.
 **Examples:**
 
 Single-file extraction:
+
 ```python
 # ORIGIN: src/core/activation.py::relu (lines 12-18)
 # EVOLVE-BLOCK-START
@@ -452,6 +485,7 @@ class Dense:
 ```
 
 Multi-file bundle:
+
 ```python
 # layers.py
 # ORIGIN: src/models/layers.py (full file)
@@ -460,6 +494,7 @@ class Dense:
 ```
 
 Extract and Isolate (multiple functions inlined into one file):
+
 ```python
 # ORIGIN: src/models/layers.py::Dense (lines 5-42)
 class Dense:

@@ -33,6 +33,7 @@ import os
 import pathlib
 import shlex
 import shutil
+import struct
 import subprocess
 import sys
 import tempfile
@@ -41,6 +42,17 @@ from typing import Any
 
 # Sentinel score returned when evaluation fails for any reason.
 FAILURE_SCORE = -(10**12)
+
+# Scores are submitted as proto `float` (float32), which rounds FAILURE_SCORE
+# up to -999999995904, so a score read back from the service compares greater
+# than the Python constant.
+_FAILURE_SCORE_FLOAT32 = struct.unpack("f", struct.pack("f", FAILURE_SCORE))[0]
+
+
+def is_failure_score(score: float) -> bool:
+  """Returns whether `score` is FAILURE_SCORE, before or after a float32 round trip."""
+  return score <= _FAILURE_SCORE_FLOAT32
+
 
 # Default timeout for evaluation in seconds.
 DEFAULT_TIMEOUT_SECONDS = 60

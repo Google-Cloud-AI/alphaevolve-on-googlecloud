@@ -161,8 +161,8 @@ class TestCLIInterface:
               "evaluator.py",
               "--output-file",
               output_file,
-              "--input-program-file",
-              "initial_program.py",
+              "--program-dir",
+              tmpdir,
           ],
           cwd=tmpdir,
           capture_output=True,
@@ -184,7 +184,7 @@ class TestCLIInterface:
     """main() writes error insights for broken programs."""
     tmpdir = tempfile.mkdtemp()
     try:
-      broken = os.path.join(tmpdir, "broken.py")
+      broken = os.path.join(tmpdir, "initial_program.py")
       with open(broken, "w") as f:
         f.write("def !!!")
       shutil.copy("evaluator.py", os.path.join(tmpdir, "evaluator.py"))
@@ -196,8 +196,8 @@ class TestCLIInterface:
               "evaluator.py",
               "--output-file",
               output_file,
-              "--input-program-file",
-              "broken.py",
+              "--program-dir",
+              tmpdir,
           ],
           cwd=tmpdir,
           capture_output=True,
@@ -213,5 +213,49 @@ class TestCLIInterface:
       labels = {i["label"] for i in data["insights"]}
       assert "error" in labels
       assert "traceback" in labels
+    finally:
+      shutil.rmtree(tmpdir)
+
+  def test_cli_writes_timeout_insight_on_slow_program(self):
+    """main() enforces --timeout via SIGALRM and records a timeout insight."""
+    tmpdir = tempfile.mkdtemp()
+    try:
+      slow = os.path.join(tmpdir, "initial_program.py")
+      with open(slow, "w") as f:
+        f.write(
+            "import time\n"
+            "def evaluate(eval_inputs):\n"
+            "    time.sleep(5)\n"
+            '    return {"sum_of_radii": 1.0}\n'
+        )
+      shutil.copy("evaluator.py", os.path.join(tmpdir, "evaluator.py"))
+      output_file = os.path.join(tmpdir, "scores.json")
+
+      result = subprocess.run(
+          [
+              sys.executable,
+              "evaluator.py",
+              "--output-file",
+              output_file,
+              "--program-dir",
+              tmpdir,
+              "--timeout",
+              "1",
+          ],
+          cwd=tmpdir,
+          capture_output=True,
+          text=True,
+          timeout=60,
+          check=False,
+      )
+      assert result.returncode == 0, f"stderr: {result.stderr}"
+
+      with open(output_file) as f:
+        data = json.load(f)
+      assert data["score"] is None
+      error_text = next(
+          i["text"] for i in data["insights"] if i["label"] == "error"
+      )
+      assert "timed out after 1s" in error_text
     finally:
       shutil.rmtree(tmpdir)

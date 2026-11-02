@@ -117,9 +117,9 @@ sequence. This is NOT a single command — each step has a distinct purpose:
 ```
 
 **Why 3 steps?** The backend generates candidate programs, but evaluation
-happens locally (or in a container). `create` registers the experiment, `start`
-seeds it with your baseline, and `run` is the long-running loop that pulls
-candidates, evaluates them, and reports scores back.
+happens locally. `create` registers the experiment, `start` seeds it with your
+baseline, and `run` is the long-running loop that pulls candidates, evaluates
+them, and reports scores back.
 
 **Do NOT try to combine these into one command.** There is no `ae experiment
 create --program-file --evaluator` shortcut. Each command has different required
@@ -312,11 +312,8 @@ ae --json program evaluate \
   --backend local
 ```
 
-The default backend is `local`. Only suggest `podman` if:
-
--   The user explicitly asks for containerized execution
--   The local evaluation fails due to environment/dependency issues
--   The evaluator imports potentially dangerous or untrusted packages
+Use the `local` backend. The `podman` backend is not implemented yet, so do not
+suggest it.
 
 ### Step 2.3: Review baseline score
 
@@ -486,10 +483,10 @@ dashboards.
 **Flags for `experiment run`:**
 
 Flag               | Required             | Description
------------------- | -------------------- | ---------------------------------
+------------------ | -------------------- | -----------
 `<nickname>`       | Yes (positional)     | From Step 4.1 output
 `--evaluator`      | Yes                  | Path to evaluator script
-`--backend`        | No (default `local`) | `local` or `podman`
+`--backend`        | No (default `local`) | `local` (`podman` is not implemented yet)
 `--timeout`        | No (default 60)      | Per-evaluation timeout (seconds)
 `--dashboard`      | Yes (always pass)    | Path to write live dashboard file
 `--max-iterations` | No (default 0)       | 0 = unlimited
@@ -497,6 +494,13 @@ Flag               | Required             | Description
 This is a **blocking command** that runs until the experiment completes, fails,
 or is interrupted. The Orchestrator/Monitor skills handle running this in the
 background.
+
+**Timeout guidance:** Use `30-120s` for fast single-pass `exec()` evaluators and
+`300-1000s` for iterative numerical search (e.g., Basin-Hopping + SLSQP/LP in
+circle packing). If `evaluator.py` sets `signal.alarm(timeout_seconds)`, keep
+`DEFAULT_TIMEOUT_SECONDS` (or `--extra-evaluator-args="--timeout <N-10>"`)
+slightly **below** `--timeout <N>` (e.g., `590s` with `--timeout 600`) so the
+inner alarm writes the timeout insight JSON before `ae` kills the subprocess.
 
 
 ### Step 4.4: Verify (optional)

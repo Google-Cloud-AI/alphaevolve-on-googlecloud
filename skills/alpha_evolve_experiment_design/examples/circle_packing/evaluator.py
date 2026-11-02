@@ -2,7 +2,7 @@
 
 CLI-compatible evaluator for use with the ae CLI.
 The ae CLI invokes this as:
-  python evaluator.py --output-file <path> --input-program-file <path>
+  python evaluator.py --output-file <path> --program-dir <path>
 """
 
 import argparse
@@ -10,7 +10,9 @@ import contextlib
 import io
 import json
 import logging
+import os
 import signal
+import sys
 import traceback
 from typing import Any, Mapping
 
@@ -20,6 +22,11 @@ logger = logging.getLogger(__name__)
 
 EVALUATION_METRIC = "sum_of_radii"
 EVALUATION_INPUTS = {"n": 26}
+# Iterative numerical optimization (e.g., multi-start Basin-Hopping + SLSQP/LP)
+# requires several minutes per candidate to escape local jamming basins.
+# Kept 10s below a 600s `ae experiment run --timeout 600` so the inner SIGALRM
+# writes the timeout insight JSON before the outer subprocess timeout kills it.
+DEFAULT_TIMEOUT_SECONDS = 590
 
 
 class EvaluationTimeoutError(Exception):
@@ -36,6 +43,7 @@ if hasattr(signal, "SIGALRM"):
 
 def _solution_diagnostics(
     exec_namespace: dict[str, Any],
+    cached_radii: np.ndarray | None = None,
 ) -> list[dict[str, str]]:
   """Extract problem-specific diagnostics from the executed program.
 
@@ -44,12 +52,13 @@ def _solution_diagnostics(
   """
   insights = []
   try:
-    construct = exec_namespace.get("construct_packing")
-    if not callable(construct):
-      return insights
-
     n = EVALUATION_INPUTS["n"]
-    _, radii, _ = construct(n, random_seed=42)
+    radii = cached_radii
+    if radii is None:
+      construct = exec_namespace.get("construct_packing")
+      if not callable(construct):
+        return insights
+      _, radii, _ = construct(n, random_seed=42)
     nonzero = radii[radii > 1e-10]
     if len(nonzero) > 0:
       lines = [
@@ -70,7 +79,9 @@ def _solution_diagnostics(
   return insights
 
 
-def evaluate_program(code: str, timeout_seconds: int = 30) -> dict[str, Any]:
+def evaluate_program(
+    code: str, timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS
+) -> dict[str, Any]:
   """Execute candidate code and return the evaluation result.
 
   Args:
@@ -98,12 +109,25 @@ def evaluate_program(code: str, timeout_seconds: int = 30) -> dict[str, Any]:
         "Mapping": Mapping,
     }
 
+    last_packing: dict[str, Any] = {}
+
     # Capture stdout/stderr from the executed program.
     with (
         contextlib.redirect_stdout(stdout_capture),
         contextlib.redirect_stderr(stderr_capture),
     ):
       exec(code, exec_namespace)  # pylint: disable=exec-used
+      orig_construct = exec_namespace.get("construct_packing")
+      if callable(orig_construct):
+
+        def _tracked_construct(*args: Any, **kwargs: Any) -> Any:
+          out = orig_construct(*args, **kwargs)
+          if isinstance(out, tuple) and len(out) >= 2:
+            last_packing["radii"] = out[1]
+          return out
+
+        exec_namespace["construct_packing"] = _tracked_construct
+
       eval_func = exec_namespace.get("evaluate")
 
       if callable(eval_func):
@@ -114,6 +138,9 @@ def evaluate_program(code: str, timeout_seconds: int = 30) -> dict[str, Any]:
             stdout=stdout_capture.getvalue(),
             stderr=stderr_capture.getvalue(),
         )
+
+    if hasattr(signal, "alarm"):
+      signal.alarm(0)
 
     stdout = stdout_capture.getvalue()
     stderr = stderr_capture.getvalue()
@@ -128,7 +155,9 @@ def evaluate_program(code: str, timeout_seconds: int = 30) -> dict[str, Any]:
 
       # Add problem-specific diagnostics to help the LLM understand
       # the solution quality and guide future improvements.
-      insights.extend(_solution_diagnostics(exec_namespace))
+      insights.extend(
+          _solution_diagnostics(exec_namespace, last_packing.get("radii"))
+      )
 
       return {"score": float(raw_score), "insights": insights}
 
@@ -178,22 +207,41 @@ def main():
   """CLI entry point. Called by the ae CLI.
 
   The ae CLI invokes this as:
-    python evaluator.py --output-file <path> --input-program-file <path> [...]
+    python evaluator.py --output-file <path> --program-dir <path> [...]
   """
   parser = argparse.ArgumentParser()
   parser.add_argument("--output-file", required=True)
-  parser.add_argument(
+  source_group = parser.add_mutually_exclusive_group(required=True)
+  source_group.add_argument(
+      "--program-dir",
+      help="Directory containing initial_program.py to evaluate.",
+  )
+  source_group.add_argument(
       "--input-program-file",
-      required=True,
       action="append",
-      help="Path to a program file to evaluate (repeatable).",
+      help="Path to a program file to evaluate (legacy fallback).",
+  )
+  parser.add_argument(
+      "--timeout",
+      type=int,
+      default=DEFAULT_TIMEOUT_SECONDS,
+      help=(
+          "Max seconds before the evaluation is killed (can be passed via "
+          "--extra-evaluator-args; keep slightly below ae --timeout)."
+      ),
   )
   args = parser.parse_args()
 
-  with open(args.input_program_file[0]) as f:
+  if args.program_dir:
+    sys.path.insert(0, args.program_dir)
+    program_path = os.path.join(args.program_dir, "initial_program.py")
+  else:
+    program_path = args.input_program_file[0]
+
+  with open(program_path) as f:
     code = f.read()
 
-  result = evaluate_program(code)
+  result = evaluate_program(code, timeout_seconds=args.timeout)
 
   with open(args.output_file, "w") as f:
     json.dump(result, f)
