@@ -495,6 +495,13 @@ This is a **blocking command** that runs until the experiment completes, fails,
 or is interrupted. The Orchestrator/Monitor skills handle running this in the
 background.
 
+**Timeout guidance:** Use `30-120s` for fast single-pass `exec()` evaluators and
+`300-1000s` for iterative numerical search (e.g., Basin-Hopping + SLSQP/LP in
+circle packing). If `evaluator.py` sets `signal.alarm(timeout_seconds)`, keep
+`DEFAULT_TIMEOUT_SECONDS` (or `--extra-evaluator-args="--timeout <N-10>"`)
+slightly **below** `--timeout <N>` (e.g., `590s` with `--timeout 600`) so the
+inner alarm writes the timeout insight JSON before `ae` kills the subprocess.
+
 
 ### Step 4.4: Verify (optional)
 
