@@ -164,12 +164,12 @@ ae --json experiment run brave-otter \
   --backend local
 ```
 
-| Flag | Required | Default | Description |
-|------|----------|---------|-------------|
-| `--evaluator` | Yes | - | Path to evaluator file |
-| `--max-iterations` | No | 0 (unlimited) | Max evaluation iterations |
-| `--timeout` | No | 60 | Timeout per evaluation (seconds) |
-| `--backend` | No | "local" | Eval backend: "local" or "podman" |
+Flag               | Required | Default       | Description
+------------------ | -------- | ------------- | -----------
+`--evaluator`      | Yes      | -             | Path to evaluator file
+`--max-iterations` | No       | 0 (unlimited) | Max evaluation iterations
+`--timeout`        | No       | 60            | Timeout per evaluation (seconds)
+`--backend`        | No       | "local"       | Eval backend: "local" ("podman" is not implemented yet)
 
 ### ae experiment delete
 
@@ -192,15 +192,15 @@ ae --json program evaluate \
   --backend local
 ```
 
-| Flag | Required | Default | Description |
-|------|----------|---------|-------------|
-| `--program-file` | No* | - | Path to a local program .py file |
-| `--program-name` | No* | - | Resource name or nickname (fetched from API) |
-| `--program-dir` | No* | - | Directory containing program files |
-| `--experiment` | No | - | Parent experiment (required with --program-name) |
-| `--evaluator` | Yes | - | Path to the evaluator script |
-| `--backend` | No | "local" | Eval backend: "local" or "podman" |
-| `--timeout` | No | 60 | Max evaluation time in seconds |
+Flag             | Required | Default | Description
+---------------- | -------- | ------- | -----------
+`--program-file` | No*      | -       | Path to a local program .py file
+`--program-name` | No*      | -       | Resource name or nickname (fetched from API)
+`--program-dir`  | No*      | -       | Directory containing program files
+`--experiment`   | No       | -       | Parent experiment (required with --program-name)
+`--evaluator`    | Yes      | -       | Path to the evaluator script
+`--backend`      | No       | "local" | Eval backend: "local" ("podman" is not implemented yet)
+`--timeout`      | No       | 60      | Max evaluation time in seconds
 
 *One of `--program-file`, `--program-name`, or `--program-dir` must be provided.
 

@@ -177,9 +177,10 @@ directory.
     relative to the original codebase will fail with `ModuleNotFoundError`.
     Imports between bundled program files (e.g., `import layers` where
     `layers.py` is another file in the experiment directory) ARE allowed. Only
-    stdlib, `pyproject.toml` dependencies, and other bundled program files are
-    available at evaluation time. See `references/multi_file_guide.md` for
-    multi-file import constraints.
+    stdlib, packages installed in the `ae` environment, and other bundled
+    program files are available at evaluation time; `pyproject.toml`
+    dependencies are not (see `references/phase_2_implement.md` Step 1). See
+    `references/multi_file_guide.md` for multi-file import constraints.
 -   Never modify the evaluation metric or scoring logic without user consent.
 -   Initial programs MUST be standalone runnable Python files.
 -   Always use `uv run python` (or `uv run pytest`) instead of invoking a bare

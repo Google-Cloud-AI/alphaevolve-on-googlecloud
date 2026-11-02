@@ -11,6 +11,7 @@ experiments with the `ae` CLI.
 the experiment was deleted.
 
 **Fix:**
+
 1. List all experiments: `ae --json experiment list`
 2. Find the correct nickname or ID
 3. Verify the config points to the right project: `ae --json config show`
@@ -24,6 +25,7 @@ the experiment was deleted.
 The backend generates candidate programs asynchronously.
 
 **Fix:**
+
 1. Check experiment state: `ae --json experiment describe <exp>`
 2. If `ACTIVE`, wait 1-2 minutes and try again -- the backend is generating programs
 3. If `INITIALIZED`, the experiment has not been started. Use the Runner skill
@@ -51,6 +53,7 @@ with a failure score, and the loop continues. No action needed.
 **Cause:** The path to the evaluator script is incorrect.
 
 **Fix:**
+
 1. Verify the evaluator file exists at the given path
 2. Use an absolute path if relative paths are not resolving
 
@@ -60,24 +63,31 @@ with a failure score, and the loop continues. No action needed.
 configured timeout.
 
 **Fix:**
+
 1. Increase the timeout: `ae experiment run <exp> --evaluator <eval> --timeout 120`
 2. Check if the program has infinite loops (review with `ae program show <prog> --code`)
-3. Consider using `--backend podman` for resource isolation
 
 ### Evaluation fails with ImportError
 
-**Cause:** The evaluator or program requires Python packages not available
-in the local environment.
+**Cause:** The evaluator or program requires Python packages not available in
+the local environment. The local backend runs evaluations with the Python that
+runs `ae` itself, not the experiment's `uv` project, so `uv add` in the
+experiment directory does not help.
 
-**Fix (Option A):** Install missing dependencies:
+**Fix:** Install the missing packages into the `ae` environment. For a `uv` tool
+install (the default), list every package the experiment needs, because
+`--reinstall` replaces the previous set:
+
 ```bash
-pip install <missing_package>
+uv tool install --reinstall --with scipy "git+https://github.com/Google-Cloud-AI/alphaevolve-on-googlecloud.git#subdirectory=skills"
 ```
 
-**Fix (Option B):** Use the podman backend:
-```bash
-ae experiment run <exp> --evaluator <eval> --backend podman
-```
+If `ae` was installed with `pip` into a virtualenv, run
+`pip install <missing_package>` in that virtualenv. Programs that already failed
+keep their failed score; only later candidates benefit. Naming the allowed
+packages in `problem_description.md` does not help a running experiment:
+`ae experiment create` sends that file once, so the change only affects
+experiments created afterwards.
 
 ## Monitoring Issues
 
@@ -104,6 +114,7 @@ after several minutes, check the control loop output for errors.
 **Cause:** The engine does not exist in the specified project/location.
 
 **Fix:**
+
 1. Verify config: `ae --json config show`
 2. Check the engine exists: `ae --json engine list`
 3. Update config: `ae config --engine=<correct_engine>`
@@ -113,6 +124,7 @@ after several minutes, check the control loop output for errors.
 **Cause:** The user lacks permissions on the project.
 
 **Fix:**
+
 1. Ensure the user has the `Discovery Engine Editor` IAM role
 2. Check project access: `gcloud projects get-iam-policy <PROJECT_ID>`
 
@@ -121,6 +133,7 @@ after several minutes, check the control loop output for errors.
 **Cause:** Application Default Credentials (ADC) are not configured.
 
 **Fix:**
+
 ```bash
 gcloud auth application-default login
 ```
@@ -155,6 +168,7 @@ tail -50 /tmp/ae_control_loop_<EXPERIMENT>.log
 ### Getting verbose output
 
 Add `--verbose` to any `ae` command for detailed HTTP request/response logs:
+
 ```bash
 ae --verbose --json experiment describe <exp>
 ```
@@ -162,6 +176,7 @@ ae --verbose --json experiment describe <exp>
 ### Clearing cached data
 
 If data seems stale, remove the cache directory. On Linux/macOS for example:
+
 ```bash
 rm -rf ~/.config/ae/cache/
 ```

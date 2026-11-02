@@ -132,16 +132,16 @@ ae --json experiment run <EXPERIMENT> \
   --evaluator <EVALUATOR_FILE> \
   --max-iterations <N> \
   --timeout <SECONDS> \
-  --backend <local|podman>
+  --backend local
 ```
 
-| Flag | Required | Default | Description |
-|------|----------|---------|-------------|
-| `--evaluator` | Yes | - | Path to evaluator script |
-| `--max-iterations` | No | 0 (unlimited) | Max evaluation iterations |
-| `--timeout` | No | 60 | Per-evaluation timeout in seconds |
-| `--backend` | No | `local` | Eval backend: `local` or `podman` |
-| `--dashboard` | No | None | Path to write a live-updating markdown dashboard |
+Flag               | Required | Default       | Description
+------------------ | -------- | ------------- | -----------
+`--evaluator`      | Yes      | -             | Path to evaluator script
+`--max-iterations` | No       | 0 (unlimited) | Max evaluation iterations
+`--timeout`        | No       | 60            | Per-evaluation timeout in seconds
+`--backend`        | No       | `local`       | Eval backend: `local` (`podman` is not implemented yet)
+`--dashboard`      | No       | None          | Path to write a live-updating markdown dashboard
 
 **Behavior:**
 
@@ -235,11 +235,11 @@ ae --json program evaluate \
   --backend local
 ```
 
-| Flag | Required | Default | Description |
-|------|----------|---------|-------------|
-| `--program-file` | Yes | - | Path to the program to evaluate |
-| `--evaluator` | Yes | - | Path to the evaluator script |
-| `--backend` | No | `local` | `local` or `podman` |
+Flag             | Required | Default | Description
+---------------- | -------- | ------- | -----------
+`--program-file` | Yes      | -       | Path to the program to evaluate
+`--evaluator`    | Yes      | -       | Path to the evaluator script
+`--backend`      | No       | `local` | `local` (`podman` is not implemented yet)
 
 Note: Both `--program-file` (single file) and `--program-dir` (directory)
 are supported. Use `--program-dir` for multi-file experiments.

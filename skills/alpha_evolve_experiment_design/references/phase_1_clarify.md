@@ -63,13 +63,13 @@ them as a table:
 | `metric_name` | `sum_of_radii` | Primary metric |
 | `metric_direction` | `maximize` | |
 | `eval_inputs` | `{"n": 26}` | Test case parameters |
-| `allowed_imports` | `["numpy"]` | |
-| `forbidden_imports` | `[]` | |
+| `allowed_imports` | `["numpy"]` | Written into `problem_description.md` |
+| `forbidden_imports` | `[]` | Named in `problem_description.md`; leaving a package out of `pyproject.toml` does not block it |
 | `initial_program_description` | *[draft text]* | What solve() does |
 | `evolve_block_description` | *[draft text]* | What goes in EVOLVE-BLOCK |
 | `evaluation_strategy` | `FIXED_BENCHMARK` | *[alternatives listed]* |
 | `timeout_seconds` | `30` | |
-| `dependencies` | `["numpy"]` | |
+| `dependencies` | `["numpy"]` | Also installed into the `ae` environment (Phase 2, Step 1) |
 | `constraints` | `[]` | |
 ```
 
