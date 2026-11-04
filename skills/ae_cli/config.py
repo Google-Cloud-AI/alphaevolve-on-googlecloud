@@ -325,7 +325,7 @@ def save_profile(
 
 
 def save_session(profile_name: str, session_id: str) -> None:
-  """Updates the session ID in an existing profile.
+  """Updates the session ID in a profile, creating the profile if missing.
 
   Loads the profile, sets the session value, and saves it back.
 
@@ -341,6 +341,7 @@ def save_session(profile_name: str, session_id: str) -> None:
   if "defaults" not in values:
     values["defaults"] = {}
   values["defaults"]["session"] = session_id
+  _ensure_dirs()
   with open(path, "w", encoding="utf-8") as f:
     f.write(_dump_toml(values))
 
