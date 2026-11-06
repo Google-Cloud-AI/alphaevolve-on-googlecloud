@@ -50,18 +50,18 @@ auth: ## Authenticate with GCP
 	gcloud auth application-default login
 
 infra: ## Provision GCP resources with Terraform (GKE, RayCluster, monitoring)
-	cd terraform && ~/bin/terraform init -input=false && ~/bin/terraform apply
+	cd terraform && terraform init -input=false && terraform apply
 
 deploy: ## Build images and deploy gateway to GKE via Cloud Build
-	@ARTIFACTS_BUCKET=$$(cd terraform && ~/bin/terraform output -raw artifacts_bucket 2>/dev/null); \
-	GKE_CLUSTER=$$(cd terraform && ~/bin/terraform output -raw gke_cluster_name 2>/dev/null); \
+	@ARTIFACTS_BUCKET=$$(cd terraform && terraform output -raw artifacts_bucket 2>/dev/null); \
+	GKE_CLUSTER=$$(cd terraform && terraform output -raw gke_cluster_name 2>/dev/null); \
 	echo "Submitting Cloud Build..."; \
 	gcloud builds submit \
 		--config=cloudbuild.yaml \
 		--substitutions="_AR_REGION=$${REGION:-us-central1},_GKE_REGION=$${REGION:-us-central1},_REPO=alphaevolve,_ARTIFACTS_BUCKET=$${ARTIFACTS_BUCKET},_HF_TOKEN=$${HF_TOKEN},_GKE_CLUSTER=$${GKE_CLUSTER}"
 
 deploy-gateway: ## Apply gateway manifest and set env vars from Terraform outputs
-	@ARTIFACTS_BUCKET=$$(cd terraform && ~/bin/terraform output -raw artifacts_bucket 2>/dev/null); \
+	@ARTIFACTS_BUCKET=$$(cd terraform && terraform output -raw artifacts_bucket 2>/dev/null); \
 	AR_REGION=$${REGION:-us-central1}; \
 	REPO=alphaevolve; \
 	echo "Applying gateway manifest..."; \
@@ -94,4 +94,4 @@ run: ## Run the AlphaEvolve experiment
 	cd ../.. && python -m examples.$(EXAMPLE_NAME).src.run_evolution
 
 clean: ## Tear down all infrastructure
-	cd terraform && ~/bin/terraform destroy
+	cd terraform && terraform destroy
