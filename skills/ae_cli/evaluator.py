@@ -26,6 +26,7 @@ Supported backends:
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 import dataclasses
 import json
 import math
@@ -37,6 +38,72 @@ import subprocess
 import sys
 import tempfile
 from typing import Any
+
+_ALLOWED_ENV_VARS = frozenset({
+    "PATH",
+    "HOME",
+    "USER",
+    "LOGNAME",
+    "TMPDIR",
+    "TEMP",
+    "TMP",
+    "LANG",
+    "TERM",
+    "TZ",
+    "VIRTUAL_ENV",
+    "PYTHONPATH",
+    "CUDA_VISIBLE_DEVICES",
+    "OMP_NUM_THREADS",
+    "MKL_NUM_THREADS",
+})
+_ALLOWED_ENV_PREFIXES = (
+    "LC_",
+    "CONDA_",
+)
+
+
+def _is_allowed_env_var(name: str) -> bool:
+  upper = name.upper()
+  return upper in _ALLOWED_ENV_VARS or upper.startswith(_ALLOWED_ENV_PREFIXES)
+
+
+def _sanitize_eval_env(environ: Mapping[str, str]) -> dict[str, str]:
+  """Builds a minimal allowlisted subprocess env for local evaluation."""
+  sanitized = {
+      key: value for key, value in environ.items() if _is_allowed_env_var(key)
+  }
+  sanitized["PYTHONDONTWRITEBYTECODE"] = "1"
+  return sanitized
+
+
+def _resolve_workspace_program_path(
+    work_dir: pathlib.Path, raw_path: str
+) -> pathlib.Path:
+  """Validates a program file path stays inside `work_dir` and safe."""
+  if not raw_path or "\x00" in raw_path:
+    raise ValueError(f"Invalid program file path: {raw_path!r}")
+  posix_rel = pathlib.PurePosixPath(raw_path)
+  win_rel = pathlib.PureWindowsPath(raw_path)
+  if (
+      posix_rel.is_absolute()
+      or win_rel.is_absolute()
+      or "\\" in raw_path
+      or raw_path.startswith("/")
+  ):
+    raise ValueError(
+        f"Program file path must be relative to workspace: {raw_path!r}"
+    )
+  work_root = work_dir.resolve()
+  resolved = (work_root / posix_rel).resolve()
+  if resolved == work_root or not resolved.is_relative_to(work_root):
+    raise ValueError(
+        f"Program file path escapes workspace directory: {raw_path!r}"
+    )
+  if resolved == (work_root / "evaluator.py"):
+    raise ValueError(
+        f"Program file path cannot overwrite evaluator.py: {raw_path!r}"
+    )
+  return work_dir / posix_rel
 
 
 # Sentinel score returned when evaluation fails for any reason.
@@ -201,7 +268,7 @@ def prepare_workspace(
 
   # Write program files.
   for file_info in program_files:
-    file_path = work_dir / file_info["path"]
+    file_path = _resolve_workspace_program_path(work_dir, file_info["path"])
     file_path.parent.mkdir(parents=True, exist_ok=True)
     file_path.write_text(file_info["content"], encoding="utf-8")
 
@@ -283,7 +350,7 @@ def evaluate_local(
         timeout=timeout,
         cwd=str(workspace),
         check=False,
-        env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+        env=_sanitize_eval_env(os.environ),
     )
 
     stdout = result.stdout
