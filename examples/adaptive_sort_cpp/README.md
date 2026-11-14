@@ -1,6 +1,10 @@
 # Adaptive Sort C++ Example
 
-This example demonstrates how to evolve a C++ sorting algorithm that adapts to different data patterns (random, sorted, reverse, duplicates) using the `alpha_evolve` library. It uses a remote Google Cloud Function to compile and evaluate the C++ code safely.
+This example demonstrates how to evolve a C++ sorting algorithm using the `alpha_evolve` library. It uses a remote Google Cloud Function to compile and evaluate the C++ code safely.
+
+> **Note:** unlike the Rust [`adaptive_sort`](../adaptive_sort) example, the current C++ harness
+> benchmarks a single data pattern rather than a range of them. See
+> [Metrics](#metrics) for what that means when reading results.
 
 ## Directory Structure
 
@@ -8,6 +12,45 @@ This example demonstrates how to evolve a C++ sorting algorithm that adapts to d
 - `src/`: Initial C++ source files (`sort.hpp`, `sort_impl.hpp`, `benchmark.hpp`, `benchmark.cpp`) used as the starting point for evolution.
 - `run_experiment.py`: The main script to run the evolution experiment.
 - `evaluator.py`: Contains the client-side evaluation logic.
+
+## Metrics
+
+The harness benchmarks each candidate over **5 datasets of 100 uniformly-random integers**,
+drawn from a seeded `std::mt19937(42)` (`src/main.cpp`). Evaluation is therefore deterministic,
+but every dataset shares one distribution and one size.
+
+| Metric | Description |
+|--------|-------------|
+| `score` | **Primary.** `0.6 × performance_score + 0.4 × adaptability_score`, or `0.0` if any case sorted incorrectly. Higher is better. |
+| `performance_score` | `1 / (1 + avg_time × 10)`. Higher is faster. |
+| `adaptability_score` | `1 / (1 + σ(times))`. Intended to reward consistency across input shapes. |
+| `correctness` | `1.0` if all 5 cases sorted correctly, else `0.0`. |
+| `compile_success` | `1.0` if the candidate compiled, else `0.0`. |
+| `avg_time` | Mean sort time in seconds across the 5 cases. |
+| `memory_safe` | Always `1.0` — a placeholder; nothing currently measures memory. |
+
+Failure paths return a subset: a compile failure yields only `score` and `compile_success`, and
+a runtime failure adds `correctness`, `performance_score` and `adaptability_score` at `0.0`.
+
+**Build and run output reaches the model.** Compiler stderr, stdout and any error text are
+forwarded to AlphaEvolve as insights, so a candidate that fails to compile comes back with the
+compiler's own message attached. If the evaluator service itself is unreachable, the candidate
+is left unscored rather than penalized — see the
+[scoring convention](../../README.md#scoring-convention).
+
+### Known limitations of the current benchmark
+
+Two properties of the harness limit how far these numbers can be trusted:
+
+- **`adaptability_score` does not measure adaptability.** All 5 datasets share a distribution,
+  so the variance it scores is timing jitter rather than a response to differing input shapes.
+  The Rust example varies shape and size; this one does not.
+- **`score` has very little dynamic range.** Sorting 100 integers takes on the order of a
+  microsecond, so `performance_score = 1/(1 + avg_time × 10)` sits near `0.99999` for every
+  candidate and `score` lands around `0.9999` for all of them — separated mostly by noise.
+
+Widening the benchmark to the shapes and input sizes used by `adaptive_sort`
+(`sort_test/src/main.rs`) would address both.
 
 ## Prerequisites
 

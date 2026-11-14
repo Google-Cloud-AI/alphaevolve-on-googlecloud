@@ -86,10 +86,10 @@ false alarms:
 
 - **Progress is non-monotonic.** The best score can plateau for many generations and then jump.
   This is normal — **don't stop the run early** because the score looks stuck.
-- **Invalid candidates are expected.** Programs that break constraints or fail to run return a
-  sentinel score (e.g. `-inf` for an overlapping circle packing, or `neg_eval_loss = -100.0` for
-  a failed training job) **plus an insight message**. Those insights are fed back to Gemini to
-  steer the next generation, so failures are part of how the search improves.
+- **Invalid candidates are expected.** Programs that break constraints or fail to run are scored
+  with a large finite penalty (`-1e9`) **plus an insight message** explaining what went wrong.
+  Those insights are fed back to Gemini to steer the next generation, so failures are part of
+  how the search improves. See [Scoring convention](#scoring-convention).
 - **You control the budget.** A run is bounded by `MAX_PROGRAMS_GENERATED` /
   `MAX_PROGRAMS_EVALUATED` and parallelized by `CONCURRENCY` / `WORKER_CONCURRENCY` (see
   [Configuration](#configuration)).
@@ -151,6 +151,34 @@ the loop that joins the two halves:
 Because the evaluator is _your_ code, AlphaEvolve can optimize anything you can score: pure-Python
 heuristics, compiled Rust/C++, or a full model-training run. It can run locally (an `exec()`
 sandbox), in a Cloud Run function, or on a GKE + Ray GPU cluster — see [Examples](#examples).
+
+### Scoring convention
+
+AlphaEvolve **maximizes every metric it is given**, so what an evaluator reports on failure
+matters as much as what it reports on success. The examples share one convention, implemented in
+[`alpha_evolve.scoring`](src/alpha_evolve/scoring.py):
+
+| Outcome | Score | Why |
+|---------|-------|-----|
+| Worked | the measured value | Minimization targets must already be negated (`neg_eval_loss`, `neg_tour_length`) |
+| **Candidate's fault** — won't compile, crashed, wrong shape, non-finite result | `-1e9` (`hard_penalty()`) | Finite, so averages and plots still work, and far below any real score |
+| **Your evaluator's fault** — service unreachable, storage error | `None` | The candidate is blameless; penalizing it would teach the search to avoid good code whenever the evaluator flakes |
+
+Two values to avoid: `0.0` outranks every real score whenever good scores are negative, and
+`±inf` is not valid JSON — `+inf` would win outright. `finite_score()` guards against both.
+
+It ships as part of the client library, so your own evaluators can use it too:
+
+```python
+from alpha_evolve import scoring
+
+if not compiled:
+    return scoring.build_evaluation(
+        {"score": scoring.hard_penalty()},
+        [scoring.insight("compile_error", stderr)],
+    )
+return scoring.build_evaluation({"score": scoring.finite_score(value)})
+```
 
 ---
 
@@ -271,7 +299,7 @@ Find it in the Google Cloud console under your Gemini Enterprise app, or via the
 ## Repository structure
 
 ```
-src/alpha_evolve/     Client library: client, experiment, controller, workers, models, visualization
+src/alpha_evolve/     Client library: client, experiment, controller, workers, models, scoring, visualization
 examples/
   circle_packing/     combinatorial optimization, local eval
   tsp/                TSP heuristic, local eval
@@ -279,7 +307,7 @@ examples/
   adaptive_sort/      evolve Rust, Cloud Run evaluator
   adaptive_sort_cpp/  evolve C++, Cloud Run evaluator
   llm_fine_tuning/    LoRA HPO on GKE + Ray (Terraform)
-tests/                Unit tests for the library
+tests/                Unit tests for the library and the example evaluators
 bin/                  Release tooling
 ```
 
