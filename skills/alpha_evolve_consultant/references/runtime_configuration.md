@@ -98,12 +98,17 @@ Goal                         | `--models` flag(s)
 Default (recommended)        | none (API default)
 Best quality, pinned         | `--models gemini-4-argon`
 High throughput / lower cost | `--models gemini-3.5-flash`
+Gemini 4 at lower cost       | `--models gemini-4-hydrogen`
 General 90/10 Flash/Pro      | `--models name=gemini-3.5-flash,weight=0.9 --models name=gemini-3.1-pro-preview,weight=0.1`
 
+`gemini-4-hydrogen` is a Flash-size Gemini 4 model, cheaper than
+`gemini-4-argon`.
+
 **Constraints:** At most 2 models per experiment. Model availability is
-per-region: `gemini-4-argon` and `gemini-3.5-flash` are served in all enterprise
-regions (`global`/`us`/`eu`), while `gemini-3.1-pro-preview` is `global` only --
-so any Flash/Pro mix implies `global`.
+per-region: `gemini-4-argon`, `gemini-4-hydrogen` and `gemini-3.5-flash` are
+served in all enterprise regions (`global`/`us`/`eu`), while
+`gemini-3.1-pro-preview` is `global` only -- so any Flash/Pro mix implies
+`global`.
 
 ### 8.2 When to Keep the Default
 

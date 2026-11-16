@@ -34,8 +34,9 @@ Same syntax on `ae config --models=...` and `ae experiment create --models ...`.
 ## Recommended models
 
 Model name               | Regions        | Notes
------------------------- | -------------- | -----------------------------------
+------------------------ | -------------- | -----
 `gemini-4-argon`         | global, us, eu | Strongest Gemini
+`gemini-4-hydrogen`      | global, us, eu | Flash-size Gemini 4; cheaper than Argon
 `gemini-3.5-flash`       | global, us, eu | Faster and cheaper; high throughput
 `gemini-3.1-pro-preview` | global         | Older Pro; mix with flash
 
