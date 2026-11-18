@@ -25,6 +25,7 @@ from alpha_evolve.models import (
     AlphaEvolveEvaluationScores,
     AlphaEvolveProgramEvaluation,
 )
+from alpha_evolve import scoring
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +51,7 @@ def circle_packing_evaluation(program_candidate) -> dict:
     # Sentinel used when the program fails to produce a valid score. The API
     # requires a numeric score per metric and `sum_of_radii` is maximized, so a
     # large negative value keeps failed candidates from being selected.
-    score_value: float = -1e12
+    score_value: float = scoring.hard_penalty()
     insights_list: list[AlphaEvolveEvaluationInsight] = []
 
     try:
@@ -62,7 +63,9 @@ def circle_packing_evaluation(program_candidate) -> dict:
             result = eval_func(CIRCLE_PACKING_EVALUATION_INPUTS)
             score = result.get(CIRCLE_PACKING_EVALUATION_METRIC)
             if score != -np.inf and score is not None:
-                score_value = float(score)
+                score_value = scoring.finite_score(
+                    float(score), CIRCLE_PACKING_EVALUATION_METRIC
+                )
             else:
                 insights_list.append(
                     AlphaEvolveEvaluationInsight(
@@ -125,7 +128,8 @@ def visualize_packing(circles, title, container_size=1.0):
     )
     ax.add_patch(container)
 
-    colors = plt.cm.get_cmap("viridis", len(circles))
+    # plt.cm.get_cmap was removed in matplotlib 3.9; plt.get_cmap is the supported spelling.
+    colors = plt.get_cmap("viridis", len(circles))
     for i, (x, y, r) in enumerate(circles):
         circle = patches.Circle(
             (x, y), r, facecolor=colors(i), alpha=0.8, edgecolor="black", linewidth=0.5
