@@ -40,6 +40,11 @@ and seamlessly hand off between phases.
     my code at `<path>`". This is a clear request for AlphaEvolve optimization.
     Proceed directly to Phase 1 Design. Only ask for clarification when the
     request is genuinely ambiguous (e.g., "help me with this code").
+8.  **Stop once before each new experiment launch.** Launching bills the user's
+    Google Cloud project, so "optimize my code" is not consent to spend. Before
+    any `ae experiment create`, `start` or `run` of a new experiment (including
+    a relaunch after a `FAILED` experiment), follow
+    [Launch confirmation](#launch-confirmation).
 
 --------------------------------------------------------------------------------
 
@@ -133,11 +138,12 @@ run pytest` passes.
 Do NOT ask "How would you like to proceed?", "Should I launch?", or "Should I
 create a commit?". Do NOT offer the user a menu of options. Do NOT stop and wait
 for a new prompt. The user asked you to optimize their code — launching the
-experiment is the obvious and only next step.
+experiment is the obvious next step, after the one launch confirmation in
+Phase 2.
 
 Simply inform the user and continue:
 
-> Design phase complete. Proceeding to launch the experiment.
+> Design phase complete. Preparing the launch.
 
 The only exception: if the user specifically said "design an experiment" or "set
 up an experiment" (where they might want to stop after design), ask before
@@ -177,6 +183,30 @@ if they entered at Phase 2 directly).
     `--output-file` and `--program-dir`).
 4.  If either is missing, suggest going back to Phase 1 (Design) to create
     proper artifacts.
+
+### Launch confirmation
+
+After the Runner's baseline evaluation and before any `ae experiment create`,
+stop once and ask, in one message:
+
+> This run is billed to Google Cloud project `<PROJECT_ID>`. It will create up
+> to `<MAX_PROGRAMS>` programs with `<MODEL>`. Estimated cost: about
+> `$<ESTIMATE>`. Launch it? (yes / change settings)
+
+-   **Estimate:** a 50-program run on Gemini 4 Argon used 235,056 input and
+    215,309 output tokens, $15.74 at the 2026-11-17 prices, so about $0.31 per
+    program. Scale by the program cap and the model's current AlphaEvolve price,
+    use the Argon rate when the model's price is unknown, and call it an
+    estimate.
+-   Wait for the answer. A "yes" covers this launch (a relaunch after a `FAILED`
+    experiment creates a new billed experiment and asks again unless a standing
+    yes covers it); then continue without asking again. The Runner's own Stage 3
+    table can be this message.
+-   **A standing yes is the answer.** If an always-on rule or the user's request
+    already accepts the AlphaEvolve price and launch confirmations within a
+    program cap, do not stop. Name that rule in one line, keep `--max-programs`
+    within its cap, and continue. Without such a rule, "optimize my code" or a
+    pre-configured `ae` profile is not a yes.
 
 **Completion gate:** The experiment is in ACTIVE state and the user has received
 the experiment nickname.
@@ -299,6 +329,7 @@ User Request
      |         v
      |     [Phase 2: Runner]
      |     Load: alpha-evolve-runner
+     |     STOP ONCE: launch confirmation (cost), unless a standing yes
      |     Gate: experiment ACTIVE + nickname obtained
      |         |
      |         v (proceed immediately, no confirmation needed)

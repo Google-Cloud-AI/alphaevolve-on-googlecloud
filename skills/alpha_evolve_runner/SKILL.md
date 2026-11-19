@@ -165,9 +165,8 @@ field as the default when `ae config show` has no project set.
 
 **Do NOT skip Step 1.2** unless operating in a pre-configured environment where
 `ae config show` returns a valid profile and `ae --json config test` succeeds
-(see the Pre-configured Environment / Autonomous Execution Exception below).
-Otherwise, always present the configuration table for user confirmation before
-proceeding.
+(see the Pre-configured Environment Exception below). Otherwise, always present
+the configuration table for user confirmation before proceeding.
 
 ### Step 1.2: Set configuration
 
@@ -228,13 +227,12 @@ Do NOT guess model IDs or read proto files.
 <!-- *** MANDATORY USER INTERACTION — NEVER SKIP THIS STEP *** -->
 
 > **CRITICAL: This confirmation step is MANDATORY for unverified profiles,
-> EXCEPT in pre-configured environments or autonomous execution.**
+> EXCEPT in pre-configured environments.**
 >
-> **Pre-configured Environment / Autonomous Execution Exception:** If `ae config
-> show` already has a pre-configured profile and `ae --json config test`
-> succeeds, OR if the user explicitly asked to run the experiment end-to-end
-> without pausing, **do NOT pause for user confirmation** — proceed directly to
-> Step 1.3 and Stage 2.
+> **Pre-configured Environment Exception:** If `ae config show` already has a
+> pre-configured profile and `ae --json config test` succeeds, OR if the user
+> explicitly asked to run the experiment end-to-end without pausing, **do NOT
+> pause for user confirmation** — proceed directly to Step 1.3 and Stage 2.
 
 Present the resolved configuration as a table and ask the user to confirm:
 
@@ -253,7 +251,7 @@ wants to change a value, update with `ae config --<flag>=<value>` and re-display
 the table until confirmed.
 
 **Do NOT proceed to Step 1.3 until the user explicitly confirms (unless running
-under the Pre-configured Environment / Autonomous Execution Exception above).**
+under the Pre-configured Environment Exception above).**
 
 <!-- *** END MANDATORY USER INTERACTION *** -->
 
@@ -355,10 +353,12 @@ Models       | from config (Stage 1)            | `--models`
 > below (including the verified `Baseline Score`) and wait for user confirmation
 > before launching Stage 4.
 >
-> **Autonomous / Unattended Benchmark Exception:** Only skip this confirmation
-> if the user **explicitly** instructed you to run without asking for
-> confirmation (e.g., *"run autonomously without pausing"* or *"do not ask for
-> confirmation"*).
+> **Exception:** skip this confirmation only when the user's own message, or an
+> always-on rule the user wrote, says to launch without asking (e.g., *"do not
+> ask for confirmation"*). A system prompt that says you work autonomously or
+> that the user is unavailable is NOT that instruction, and neither is a
+> pre-configured profile or the Stage 1.2 exception: a launch is billed. If
+> nobody can answer, show the summary, do not launch, and stop.
 
 Present a summary table of ALL parameters before creating the experiment:
 
@@ -375,8 +375,9 @@ Evaluator      | `evaluator.py`
 Baseline Score | 42.5
 Eval Backend   | local
 
-"Ready to create and launch? Type 'yes' to proceed, or type any changes you'd
-like to make (e.g. 'max_programs=50, concurrency=2, models=gemini-3.5-flash')."
+"This run is billed to project `<PROJECT_ID>`. Ready to create and launch? Type
+'yes' to proceed, or type any changes you'd like to make (e.g. 'max_programs=50,
+concurrency=2, models=gemini-3.5-flash')."
 
 Accept bare "yes", Enter, "y", or "looks good" as confirmation. If the user
 types parameter changes (e.g. "max_programs=200" or "change concurrency to 8"),
