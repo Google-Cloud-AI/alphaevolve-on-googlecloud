@@ -17,16 +17,14 @@
 from __future__ import annotations
 
 import ast
-from collections.abc import Mapping
 import datetime
 import json
 import os
 import pathlib
-import re
 import shlex
 import subprocess
 import sys
-from typing import Annotated, Any, NoReturn, Optional, TypedDict
+from typing import Annotated, Any, NoReturn, Optional
 
 # ---------------------------------------------------------------------------
 # Encoding — ensure console I/O uses UTF-8 on all platforms.
@@ -56,8 +54,7 @@ for _stream in (
       pass
 del _stream
 
-import immutabledict  # pylint: disable=g-import-not-at-top
-import rich
+import rich  # pylint: disable=g-import-not-at-top
 import typer
 from typer import _completion_classes
 from typer import _completion_shared
@@ -70,6 +67,7 @@ from . import evaluator as evaluator_module
 from . import formatting
 from . import locks
 from . import nicknames
+from . import resolution
 from . import skills_install
 from . import version as ae_version
 from . import visualization
@@ -129,52 +127,6 @@ app.add_typer(engine_app, name="engine")
 app.add_typer(skills_install.skills_app, name="skills")
 
 
-class _ModelConfig(TypedDict):
-  """A single entry (model name + relative weight) in a `models` mixture."""
-
-  name: str
-  weight: float
-
-
-# Maps each `--model` CLI value to the AlphaEvolve API's generation `models`
-# field. The API selects generation models via the repeated `models` field,
-# which replaced an earlier single-`model` setting; the `--model` flag is kept
-# stable for existing users and expanded here into the equivalent entries.
-# `gemini_v3p1_pro` is deprecated and maps to no entries, so the API applies
-# its default model.
-_MODEL_TO_MODELS: Mapping[str, tuple[_ModelConfig, ...]] = (
-    immutabledict.immutabledict({
-        "gemini_v2p5_flash": (
-            _ModelConfig(name="gemini-2.5-flash", weight=1.0),
-        ),
-        "gemini_v2p5_mixture": (
-            _ModelConfig(name="gemini-2.5-flash", weight=0.9),
-            _ModelConfig(name="gemini-2.5-pro", weight=0.1),
-        ),
-        "gemini_v3p0_mixture": (
-            _ModelConfig(name="gemini-3-flash-preview", weight=1.0),
-        ),
-        "gemini_v3p1_mixture": (
-            _ModelConfig(name="gemini-3-flash-preview", weight=0.9),
-            _ModelConfig(name="gemini-3.1-pro-preview", weight=0.1),
-        ),
-        "gemini_v3p1_fifty_fifty_mixture": (
-            _ModelConfig(name="gemini-3-flash-preview", weight=0.5),
-            _ModelConfig(name="gemini-3.1-pro-preview", weight=0.5),
-        ),
-        "gemini_v3p1_pro": (),
-    })
-)
-
-
-# Maps enum-form profile `[model]` values (e.g. `GEMINI_V2P5_FLASH`) back to the
-# lowercase `_MODEL_TO_MODELS` preset keys so a legacy `[model]` profile can
-# still select a model for `experiment create`.
-_ENUM_TO_PRESET: Mapping[str, str] = immutabledict.immutabledict(
-    {preset.upper(): preset for preset in _MODEL_TO_MODELS}
-)
-
-
 def _warn(message: str) -> None:
   """Writes a non-fatal notice to stderr (keeps --json stdout parseable)."""
   typer.echo(message, err=True)
@@ -210,74 +162,11 @@ def _err(message: str) -> NoReturn:
 
 
 def _parse_models_flag(tokens: list[str]) -> list[config.ModelEntry]:
-  """Parses repeatable `--models` tokens into normalized model entries.
-
-  Each token is either a bare model name (``gemini-3.5-flash``) or a
-  comma-separated list of ``key=value`` fields (``name=...,weight=...``). `name`
-  is required and non-empty; `weight`, when present, must parse as a float. Any
-  other key is passed through verbatim (as a string) with a non-fatal stderr
-  warning, so the surface needs no change when `ModelConfig` gains fields. Only
-  structural validation is done; model-name/weight semantics are left to the
-  API.
-
-  Args:
-    tokens: The raw `--models` option values.
-
-  Returns:
-    A list of dicts shaped like ``{"name": str, "weight"?: float, ...}``.
-
-  Raises:
-    typer.Exit: If a token is empty/unparseable, lacks a `name`, or carries a
-      non-float `weight`.
-  """
-  parsed: list[config.ModelEntry] = []
-  for raw in tokens:
-    token = raw.strip()
-    if not token:
-      _err("empty --models entry")
-    if "=" not in token:
-      parsed.append({"name": token})  # bare-name shorthand
-      continue
-    entry: config.ModelEntry = {}
-    for field in token.split(","):
-      field = field.strip()
-      if not field:
-        continue
-      key, sep, value = field.partition("=")
-      key = key.strip()
-      value = value.strip()
-      if not sep or not key:
-        _err(f"invalid --models field {field!r}; expected key=value")
-      if key == "name":
-        entry["name"] = value
-      elif key == "weight":
-        try:
-          entry["weight"] = float(value)
-        except ValueError:
-          _err(f"invalid weight {value!r} in --models; must be a number")
-      else:
-        entry[key] = value
-        _warn(f"unrecognized model field '{key}', sending as-is")
-    if not entry.get("name"):
-      _err(f"--models entry {token!r} is missing a non-empty name")
-    parsed.append(entry)
-  return parsed
-
-
-def _legacy_model_to_models(preset: str) -> list[config.ModelEntry]:
-  """Expands a legacy `--model`/`[model]` preset into `models` entries.
-
-  Args:
-    preset: A legacy preset key (e.g. `gemini_v2p5_flash`); see
-      `_MODEL_TO_MODELS`.
-
-  Returns:
-    Freshly copied `{"name", "weight"}` dicts (so the immutable
-    `_MODEL_TO_MODELS` constant is never aliased into a request body). An
-    unknown preset yields an empty list; callers that must reject unknown
-    presets check `_MODEL_TO_MODELS` membership first.
-  """
-  return [dict(entry) for entry in _MODEL_TO_MODELS.get(preset, ())]
+  """Parses repeatable `--models` tokens into normalized model entries."""
+  try:
+    return config.parse_models_flag(tokens, warn_fn=_warn)
+  except ValueError as e:
+    _err(str(e))
 
 
 def _resolve_models(
@@ -286,81 +175,22 @@ def _resolve_models(
     cfg_models: list[config.ModelEntry] | None,
     cfg_model: str | None,
 ) -> list[config.ModelEntry]:
-  """Resolves the effective `models` list from all sources by precedence.
-
-  Highest priority first: the `--models` flag, the legacy `--model` flag, the
-  config `[[models]]` section, and the legacy config `[model]` section. Every
-  source is normalized to the single ``list[dict]`` shape, so the CLI
-  structurally can only ever emit `models` (and never the mutually exclusive
-  `model`/`model_mixture`). The result is empty when nothing is set, or when the
-  winning source expands to no entries (e.g. ``gemini_v3p1_pro``); an empty
-  result leaves `generationSettings.models` unset so the API applies its own
-  default.
-
-  Deprecation/migration notices go to stderr and fire only when a legacy source
-  is actually used.
-
-  Args:
-    models_flag: Parsed `--models` entries, or None when the flag was absent.
-    model_flag: The legacy `--model` value, or "" when absent.
-    cfg_models: The config `[[models]]` carrier (may be empty).
-    cfg_model: The config `[model]` preset (already mapped to a
-      `_MODEL_TO_MODELS` key), or None when it should not contribute.
-
-  Returns:
-    The normalized `models` list (possibly empty).
-
-  Raises:
-    typer.Exit: If the legacy `--model` flag value is not an allowed preset.
-  """
-  # Tier 1: --models flag.
-  if models_flag:
-    if model_flag:
-      _warn("both --model and --models supplied; using --models")
-    return models_flag
-  # Tier 2: legacy --model flag (keeps its allowlist + byte-identical output).
-  if model_flag:
-    _warn("--model is deprecated; use --models")
-    if model_flag not in _MODEL_TO_MODELS:
-      valid_models = list(_MODEL_TO_MODELS)
-      _err(f"Invalid model: {model_flag}. Must be one of {valid_models}")
-    return _legacy_model_to_models(model_flag)
-  # Tier 3: config [[models]].
-  if cfg_models:
-    return [dict(entry) for entry in cfg_models]
-  # Tier 4: legacy config [model].
-  if cfg_model:
-    _warn(
-        "profile [model] is deprecated; migrate to [[models]] via"
-        " `ae config --models`"
+  """Resolves the effective `models` list from all sources by precedence."""
+  try:
+    return config.resolve_models(
+        models_flag,
+        model_flag,
+        cfg_models,
+        cfg_model,
+        warn_fn=_warn,
     )
-    return _legacy_model_to_models(cfg_model)
-  # Tier 5: nothing specified anywhere. Return empty so `experiment create`
-  # leaves `generationSettings.models` unset and the API applies its default.
-  return []
+  except ValueError as e:
+    _err(str(e))
 
 
 def _config_model_preset(cfg: config.Config) -> str | None:
-  """Maps a profile `[model]` enum to a preset key for `_resolve_models`.
-
-  Args:
-    cfg: The resolved CLI configuration whose `[model]` profile value is mapped.
-
-  Returns:
-    The matching `_MODEL_TO_MODELS` preset key, or None when the profile
-    model is just the built-in default (so the resolver's default tier applies
-    silently) or cannot be mapped to a known preset (warned, then treated as
-    the default; never crashes legacy profiles).
-  """
-  if not cfg.model or cfg.model == config.BUILT_IN_DEFAULTS["model"]:
-    return None
-  preset = _ENUM_TO_PRESET.get(cfg.model)
-  if preset is None:
-    _warn(
-        f"profile [model] {cfg.model!r} is not a known preset; using the"
-        " default model"
-    )
-  return preset
+  """Maps a profile `[model]` enum to a preset key for `_resolve_models`."""
+  return config.config_model_preset(cfg, warn_fn=_warn)
 
 
 @engine_app.command("list")
@@ -708,56 +538,10 @@ def _list_experiments_aggregated(
     A list of experiment dictionaries aggregated from all sessions.
   """
   cfg = _state.resolve_config()
-  experiments = []
-
-  # Always aggregate experiments across all sessions to ensure comprehensive
-  # listing.
   with rich.get_console().status("Querying AlphaEvolve..."):
-    try:
-      sessions = client.list_sessions()
-      for s in sessions:
-        s_name = s.get("name", "")
-        if s_name:
-          s_id = s_name.split("/")[-1]
-          try:
-            exp_gen = client.list_experiments(
-                session_id=s_id, page_size=page_size
-            )
-            for exp in exp_gen:
-              exp["_session_id"] = s_id
-              experiments.append(exp)
-          except Exception as e:  # pylint: disable=broad-exception-caught
-            _warn(f"DEBUG: list_experiments failed for session {s_id}: {e}")
-            continue
-    except client_module.ApiError:
-      raise
-    except Exception as e:  # pylint: disable=broad-exception-caught
-      _warn(f"DEBUG: list_sessions failed: {e}")
-      return []
-
-  # Write to cache (consumed by tab-completion and TUI).
-  config.save_cache(f"experiments_list_{cfg.profile_name}", experiments)
-
-  # Save flat completion file for instant shell completions.
-  try:
-    index = nicknames.NicknameIndex.load()
-    index.add_many(experiments)
-    index.save()
-
-    flat_file = config.CACHE_DIR / f"experiments_{cfg.profile_name}.txt"
-    completions = []
-    for exp in experiments:
-      name = exp.get("name", "")
-      if name:
-        nickname = index.get_nickname(name)
-        exp_id = name.split("/")[-1]
-        completions.append(nickname)
-        completions.append(exp_id)
-    flat_file.write_text("\n".join(set(completions)), encoding="utf-8")
-  except OSError:
-    pass
-
-  return experiments
+    return resolution.list_experiments_aggregated(
+        client, cfg, page_size=page_size, warn_fn=_warn
+    )
 
 
 def _autocomplete_experiment(incomplete: str) -> list[str]:
@@ -811,100 +595,40 @@ def _resolve_experiment(
   if not client:
     client = _state.get_client()
 
-  # Check the persistent index first to avoid a network round-trip.
-  index = nicknames.NicknameIndex.load()
-  res = index.resolve(identifier)
-  if res:
-    if not res.startswith(cfg.parent):
-      if match := re.search(r"/alphaEvolveExperiments/([^/]+)$", res):
-        return cfg.experiment_name(match.group(1))
-    return res
-
-  experiments = _list_experiments_aggregated(client)
-  index.add_many(experiments)
-  index.save()
-
-  res = index.resolve(identifier)
-  if res:
-    if not res.startswith(cfg.parent):
-      if match := re.search(r"/alphaEvolveExperiments/([^/]+)$", res):
-        return cfg.experiment_name(match.group(1))
-    return res
-
-  return cfg.experiment_name(identifier)
+  return resolution.resolve_experiment(
+      identifier,
+      client,
+      cfg,
+      index=nicknames.NicknameIndex.load(),
+      list_fn=lambda: _list_experiments_aggregated(client),
+      warn_fn=_warn,
+  )
 
 
 def _resolve_program(
     identifier: str,
     experiment: str | None = None,
+    client: client_module.AlphaEvolveClient | None = None,
 ) -> str:
-  """Resolve a program identifier to full name.
-
-  Resolution order:
-    1. Full resource name (passthrough).
-    2. Persistent NicknameIndex lookup (fast, no network).
-    3. If --experiment is provided: list programs from that experiment,
-       rebuild the index, and resolve the nickname.
-    4. If the identifier looks like a raw program ID (not a nickname),
-       construct the resource name directly.
-
-  Args:
-    identifier: Nickname, short ID, or full resource name.
-    experiment: Optional parent experiment (nickname, short ID, or full name).
-
-  Returns:
-    Full resource name string.
-
-  Raises:
-    typer.Exit: If resolution fails.
-  """
+  """Resolve a program identifier to full name."""
   if "/" in identifier:
     return identifier
 
   cfg = _state.resolve_config()
-
-  # Check the persistent index first to avoid a network round-trip.
-  index = nicknames.NicknameIndex.load()
-  res = index.resolve(identifier)
-  if res:
-    if not res.startswith(cfg.parent):
-      # Session mismatch. Rebuild with current session.
-      if match := re.search(
-          r"/alphaEvolveExperiments/([^/]+)/alphaEvolvePrograms/([^/]+)$",
-          res,
-      ):
-        return cfg.program_name(match.group(1), match.group(2))
-    return res
-
-  if not experiment:
-    rich.print(
-        "[red]Error:[/red] Provide --experiment when using a short program ID."
-    )
-    raise typer.Exit(1)
-
-  # The identifier was not in the index. If --experiment is given, list
-  # programs from that experiment to rebuild the nickname index and try
-  # resolving again. This handles the case where `results best` or
-  # `experiment run` populated nicknames in a previous session but the
-  # index was lost, or when the identifier is a nickname not yet indexed.
-  exp_name = _resolve_experiment(experiment)
   try:
-    client = _state.get_client()
-    programs = list(client.list_programs(exp_name))
-    if programs:
-      index.add_many(programs)
-      index.save()
-      res = index.resolve(identifier)
-      if res:
-        return res
-  except client_module.ApiError:
-    pass  # Fall through to raw ID construction below.
-
-  # Last resort: treat identifier as a raw program ID.
-  return cfg.program_name(
-      exp_name.rsplit("/alphaEvolveExperiments/", 1)[-1],
-      identifier,
-  )
+    return resolution.resolve_program(
+        identifier,
+        experiment,
+        cfg,
+        get_client_fn=lambda: client or _state.get_client(),
+        resolve_experiment_fn=lambda exp: _resolve_experiment(
+            exp, client=client
+        ),
+        index=nicknames.NicknameIndex.load(),
+    )
+  except ValueError as e:
+    rich.print(f"[red]Error:[/red] {e}")
+    raise typer.Exit(1)
 
 
 def _get_program(
@@ -1272,15 +996,16 @@ def config_test() -> None:
   cfg = _state.resolve_config()
 
   account = "(unknown)"
-  try:
-    account = subprocess.check_output(
-        [config.gcloud_path(), "config", "get-value", "account"],
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-    ).strip()
-  except (subprocess.CalledProcessError, FileNotFoundError):
-    pass
+  if os.environ.get("ALPHAEVOLVE_NO_GCLOUD") != "1":
+    try:
+      account = subprocess.check_output(
+          [config.gcloud_path(), "config", "get-value", "account"],
+          text=True,
+          encoding="utf-8",
+          errors="replace",
+      ).strip()
+    except (subprocess.CalledProcessError, OSError):
+      pass
 
   rich.print("\n[bold]Testing AlphaEvolve Setup[/bold]")
   rich.print("━" * 40)
@@ -1407,8 +1132,12 @@ def config_discover() -> None:
   agents that need to auto-discover GCP settings before running
   ``ae config``.
   """
-  resolved = config.gcloud_path()
-  gcloud_found = resolved != "gcloud"
+  if os.environ.get("ALPHAEVOLVE_NO_GCLOUD") == "1":
+    resolved = "gcloud"
+    gcloud_found = False
+  else:
+    resolved = config.gcloud_path()
+    gcloud_found = resolved != "gcloud"
   project = config.detect_gcloud_project() if gcloud_found else None
   projects = config.list_gcloud_projects() if gcloud_found else []
   data = {
@@ -1688,14 +1417,23 @@ def experiment_start(
           f" {program_dir}…[/dim]"
       )
 
+    try:
+      validated_score = evaluator_module.validate_score(score, "score")
+    except evaluator_module.EvaluationError as e:
+      rich.print(f"[red]Error:[/red] {e}")
+      raise typer.Exit(1)
+
     program_body: dict[str, Any] = {
         "content": {"files": files_payload},
         "evaluation": {
-            "scores": {"scores": [{"metric": "score", "score": score}]}
+            "scores": {
+                "scores": [{"metric": "score", "score": validated_score}]
+            }
         },
     }
 
-    rich.print("[dim]Creating initial program…[/dim]")
+    if not _state.json_output:
+      rich.print("[dim]Creating initial program…[/dim]")
     created = _run_with_spinner(
         "Creating initial program…",
         client.create_program,
@@ -2170,7 +1908,10 @@ def program_show(
             label = insight.get("label", "info")
             text = insight.get("text", "")
             if text:
-              rich.print(f"  [bold]{label}:[/bold] {text[:_MAX_INSIGHT_CHARS]}")
+              rich.print(
+                  f"  [bold]{rich.markup.escape(label)}:[/bold]"
+                  f" {rich.markup.escape(text[:_MAX_INSIGHT_CHARS])}"
+              )
         else:
           rich.print("\n[dim]No evaluation insights available.[/dim]")
       formatting.console.print(
@@ -2331,9 +2072,19 @@ def program_submit(
         ),
     ],
     score: Annotated[
-        float,
+        Optional[float],
         typer.Option("--score", help="Evaluation score."),
-    ],
+    ] = None,
+    metrics_file: Annotated[
+        Optional[str],
+        typer.Option(
+            "--metrics-file",
+            help=(
+                "Path to a JSON file containing multi-metric scores and"
+                " optional insights (mutually exclusive with --score)."
+            ),
+        ),
+    ] = None,
     program_dir: Annotated[
         Optional[str],
         typer.Option(
@@ -2360,11 +2111,36 @@ def program_submit(
 
   Args:
     experiment: Experiment name or ID.
-    score: Evaluation score.
+    score: Evaluation score (mutually exclusive with metrics_file).
+    metrics_file: Path to a JSON file with multi-metric scores/insights.
     program_dir: Directory containing program .py files.
     program: Resource name of the program (if acquired).
     lock_token: Lock token (if acquired).
   """
+  if (score is None) == (metrics_file is None):
+    rich.print(
+        "[red]Error:[/red] Specify exactly one of --score or --metrics-file."
+    )
+    raise typer.Exit(1)
+
+  if metrics_file is not None:
+    try:
+      evaluation_payload = evaluator_module.parse_metrics_file(
+          pathlib.Path(metrics_file)
+      )
+    except evaluator_module.EvaluationError as e:
+      rich.print(f"[red]Error:[/red] {e}")
+      raise typer.Exit(1)
+  else:
+    try:
+      validated_score = evaluator_module.validate_score(score, "score")
+    except evaluator_module.EvaluationError as e:
+      rich.print(f"[red]Error:[/red] {e}")
+      raise typer.Exit(1)
+    evaluation_payload = {
+        "scores": {"scores": [{"metric": "score", "score": validated_score}]}
+    }
+
   try:
     client = _state.get_client()
     exp_name = _resolve_experiment(experiment)
@@ -2388,11 +2164,10 @@ def program_submit(
       raise typer.Exit(1)
 
     if resolved_program:
-      eval_scores = [{"metric": "score", "score": score}]
       submission = {
           "program": resolved_program,
           "lockToken": lock_token,
-          "evaluation": {"scores": {"scores": eval_scores}},
+          "evaluation": evaluation_payload,
       }
       result = client.submit_evaluations(exp_name, [submission])
       _state.output(result, index=nicknames.NicknameIndex())
@@ -2406,9 +2181,7 @@ def program_submit(
       files_payload = _prepare_program_dir_payload(program_dir)
       program_body = {
           "content": {"files": files_payload},
-          "evaluation": {
-              "scores": {"scores": [{"metric": "score", "score": score}]}
-          },
+          "evaluation": evaluation_payload,
       }
       result = client.create_program(exp_name, program_body)
       _state.output(result, index=nicknames.NicknameIndex())
@@ -2729,7 +2502,10 @@ def results_failed(
             if text:
               truncated = text[:_MAX_INSIGHT_CHARS]
               # Escape brackets to prevent Rich markup interpretation.
-              rich.print(f"  \\[{label}] {truncated}")
+              rich.print(
+                  f"  \\[{rich.markup.escape(label)}]"
+                  f" {rich.markup.escape(truncated)}"
+              )
         else:
           rich.print("  [dim]No insights available.[/dim]")
         # Show the evolved code block if present.
@@ -2753,7 +2529,7 @@ def results_failed(
             if block_lines:
               rich.print("  [dim]Evolved code:[/dim]")
               for bl in block_lines[:_MAX_EVOLVE_BLOCK_LINES]:
-                rich.print(f"    {bl}")
+                rich.print(f"    {rich.markup.escape(bl)}")
               if len(block_lines) > _MAX_EVOLVE_BLOCK_LINES:
                 remaining = len(block_lines) - _MAX_EVOLVE_BLOCK_LINES
                 rich.print(f"    [dim]... ({remaining} more lines)[/dim]")

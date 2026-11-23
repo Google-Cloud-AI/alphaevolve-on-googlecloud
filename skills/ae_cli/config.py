@@ -21,6 +21,7 @@ Handles reading/writing of named TOML profiles stored at
 
 from __future__ import annotations
 
+import collections.abc
 import dataclasses
 import functools
 import json
@@ -32,6 +33,7 @@ import subprocess
 import sys
 import time
 import tomllib
+import types
 import typing
 
 # ---------------------------------------------------------------------------
@@ -86,13 +88,168 @@ _ENV_KEY_MAP: dict[str, str] = {
 
 
 # Placeholder values that must never be sent to the API as-is.
-_SESSION_PLACEHOLDERS = frozenset({"[create new]", "-", ""})
+# "-" is a server-supported wildcard session (not a placeholder).
+_SESSION_PLACEHOLDERS = frozenset({"[create new]", ""})
 
 # A generation-model entry: {"name": str, "weight"?: float, plus any passthrough
 # keys forwarded verbatim to the API}. Deliberately a type alias and not a
 # TypedDict: we allow arbitrary passthrough keys, which a strict TypedDict would
 # make pytype reject when callers add them.
 ModelEntry: typing.TypeAlias = dict[str, typing.Any]
+
+# Maps each legacy `--model` CLI preset to the API's repeated `models` entries.
+# `gemini_v3p1_pro` is deprecated and maps to no entries, so the API applies
+# its default model.
+MODEL_PRESETS: collections.abc.Mapping[
+    str, tuple[collections.abc.Mapping[str, typing.Any], ...]
+] = types.MappingProxyType({
+    "gemini_v2p5_flash": (
+        types.MappingProxyType({"name": "gemini-2.5-flash", "weight": 1.0}),
+    ),
+    "gemini_v2p5_mixture": (
+        types.MappingProxyType({"name": "gemini-2.5-flash", "weight": 0.9}),
+        types.MappingProxyType({"name": "gemini-2.5-pro", "weight": 0.1}),
+    ),
+    "gemini_v3p0_mixture": (
+        types.MappingProxyType(
+            {"name": "gemini-3-flash-preview", "weight": 1.0}
+        ),
+    ),
+    "gemini_v3p1_mixture": (
+        types.MappingProxyType(
+            {"name": "gemini-3-flash-preview", "weight": 0.9}
+        ),
+        types.MappingProxyType(
+            {"name": "gemini-3.1-pro-preview", "weight": 0.1}
+        ),
+    ),
+    "gemini_v3p1_fifty_fifty_mixture": (
+        types.MappingProxyType(
+            {"name": "gemini-3-flash-preview", "weight": 0.5}
+        ),
+        types.MappingProxyType(
+            {"name": "gemini-3.1-pro-preview", "weight": 0.5}
+        ),
+    ),
+    "gemini_v3p1_pro": (),
+})
+
+ENUM_TO_MODEL_PRESET: collections.abc.Mapping[str, str] = (
+    types.MappingProxyType({preset.upper(): preset for preset in MODEL_PRESETS})
+)
+
+
+def parse_models_flag(
+    tokens: list[str],
+    *,
+    warn_fn: collections.abc.Callable[[str], None] | None = None,
+) -> list[ModelEntry]:
+  """Parses repeatable `--models` tokens into normalized model entries.
+
+  Args:
+    tokens: The raw `--models` option values.
+    warn_fn: Optional callback for non-fatal warnings (e.g. unrecognized keys).
+
+  Returns:
+    A list of dicts shaped like `{"name": str, "weight"?: float, ...}`.
+
+  Raises:
+    ValueError: If a token is empty/unparseable, lacks a `name`, or carries a
+      non-float `weight`.
+  """
+  parsed: list[ModelEntry] = []
+  for raw in tokens:
+    token = raw.strip()
+    if not token:
+      raise ValueError("empty --models entry")
+    if "=" not in token:
+      parsed.append({"name": token})
+      continue
+    entry: ModelEntry = {}
+    for field in token.split(","):
+      field = field.strip()
+      if not field:
+        continue
+      key, sep, value = field.partition("=")
+      key = key.strip()
+      value = value.strip()
+      if not sep or not key:
+        raise ValueError(
+            f"invalid --models field {field!r}; expected key=value"
+        )
+      if key == "name":
+        entry["name"] = value
+      elif key == "weight":
+        try:
+          entry["weight"] = float(value)
+        except ValueError as e:
+          raise ValueError(
+              f"invalid weight {value!r} in --models; must be a number"
+          ) from e
+      else:
+        entry[key] = value
+        if warn_fn is not None:
+          warn_fn(f"unrecognized model field '{key}', sending as-is")
+    if not entry.get("name"):
+      raise ValueError(f"--models entry {token!r} is missing a non-empty name")
+    parsed.append(entry)
+  return parsed
+
+
+def legacy_model_to_models(preset: str) -> list[ModelEntry]:
+  """Expands a legacy `--model`/`[model]` preset into `models` entries."""
+  return [dict(entry) for entry in MODEL_PRESETS.get(preset, ())]
+
+
+def resolve_models(
+    models_flag: list[ModelEntry] | None,
+    model_flag: str,
+    cfg_models: list[ModelEntry] | None,
+    cfg_model: str | None,
+    *,
+    warn_fn: collections.abc.Callable[[str], None] | None = None,
+) -> list[ModelEntry]:
+  """Resolves the effective `models` list from all sources by precedence."""
+  if models_flag:
+    if model_flag and warn_fn is not None:
+      warn_fn("both --model and --models supplied; using --models")
+    return models_flag
+  if model_flag:
+    if warn_fn is not None:
+      warn_fn("--model is deprecated; use --models")
+    if model_flag not in MODEL_PRESETS:
+      valid_models = list(MODEL_PRESETS)
+      raise ValueError(
+          f"Invalid model: {model_flag}. Must be one of {valid_models}"
+      )
+    return legacy_model_to_models(model_flag)
+  if cfg_models:
+    return [dict(entry) for entry in cfg_models]
+  if cfg_model:
+    if warn_fn is not None:
+      warn_fn(
+          "profile [model] is deprecated; migrate to [[models]] via"
+          " `ae config --models`"
+      )
+    return legacy_model_to_models(cfg_model)
+  return []
+
+
+def config_model_preset(
+    cfg: Config,
+    *,
+    warn_fn: collections.abc.Callable[[str], None] | None = None,
+) -> str | None:
+  """Maps a profile `[model]` enum to a preset key for `resolve_models`."""
+  if not cfg.model or cfg.model == BUILT_IN_DEFAULTS["model"]:
+    return None
+  preset = ENUM_TO_MODEL_PRESET.get(cfg.model)
+  if preset is None and warn_fn is not None:
+    warn_fn(
+        f"profile [model] {cfg.model!r} is not a known preset; using the"
+        " default model"
+    )
+  return preset
 
 
 @dataclasses.dataclass
@@ -118,8 +275,26 @@ class Config:
   profile_name: str = "default"
 
   def has_valid_session(self) -> bool:
-    """Returns True if the session value is a real ID, not a placeholder."""
+    """Returns True if the session value is a real ID or wildcard '-'."""
     return bool(self.session) and self.session not in _SESSION_PLACEHOLDERS
+
+  def is_wildcard_session(self) -> bool:
+    """Returns True if the session is the server-resolved wildcard '-'."""
+    return self.session == "-"
+
+  def has_concrete_session(self) -> bool:
+    """Returns True if the session is a concrete ID (not placeholder or '-')."""
+    return self.has_valid_session() and not self.is_wildcard_session()
+
+  @property
+  def engine_parent(self) -> str:
+    """Builds the full parent resource name prefix for the active engine."""
+    return (
+        f"projects/{self.project}"
+        f"/locations/{self.location}"
+        f"/collections/{self.collection}"
+        f"/engines/{self.engine}"
+    )
 
   @property
   def parent(self) -> str:
@@ -465,6 +640,9 @@ def _load_environ() -> dict[str, typing.Any]:
 def load_config(
     cli_overrides: dict[str, typing.Any] | None = None,
     profile_name: str | None = None,
+    *,
+    defaults_override: dict[str, typing.Any] | None = None,
+    allow_gcloud: bool = True,
 ) -> Config:
   """Loads configuration with layered resolution.
 
@@ -473,18 +651,29 @@ def load_config(
     2. ALPHAEVOLVE_* environment variables
     3. CWD .env file
     4. Active profile
-    5. Built-in defaults
+    5. defaults_override (optional caller-provided environment defaults)
+    6. Built-in defaults
 
   Args:
     cli_overrides: Optional dictionary of overrides provided via CLI flags.
     profile_name: Optional name of the profile to load, bypassing active
       default.
+    defaults_override: Optional caller-provided defaults layered above built-in
+      defaults and below the active profile so user profile edits remain
+      effective.
+    allow_gcloud: Whether to allow invoking `gcloud` to resolve a non-numeric
+      project ID into a project number. Set to False in environments without
+      ambient gcloud credentials (e.g. MCP transport mode).
 
   Returns:
     A resolved Config object ready for usage orchestrators binding correctly.
   """
   # Start with defaults.
   merged = dict(BUILT_IN_DEFAULTS)
+
+  # Layer: caller-provided environment defaults (below user profile).
+  if defaults_override:
+    merged.update({k: v for k, v in defaults_override.items() if v is not None})
 
   # Layer: active profile.
   pname = profile_name or get_active_profile_name()
@@ -515,8 +704,13 @@ def load_config(
   # Resolve project ID → project number.  The Discovery Engine API requires
   # numeric project numbers in resource paths.
   project = merged.get("project", "")
-  if project:
-    merged["project"] = resolve_project_number(project)
+  if project and not project.isdigit():
+    if allow_gcloud and os.environ.get("ALPHAEVOLVE_NO_GCLOUD") != "1":
+      merged["project"] = resolve_project_number(project)
+    else:
+      cache = get_cache("project_number_map", ttl_seconds=None) or {}
+      if project in cache:
+        merged["project"] = cache[project]
 
   # Build Config object.
   config_fields = {f.name for f in dataclasses.fields(Config)}
@@ -637,6 +831,8 @@ def detect_gcloud_project() -> str | None:
   Returns:
     The string project ID if found, else None correctly triggers.
   """
+  if os.environ.get("ALPHAEVOLVE_NO_GCLOUD") == "1":
+    return None
   try:
     result = subprocess.run(
         [gcloud_path(), "config", "get-value", "project"],
@@ -648,9 +844,11 @@ def detect_gcloud_project() -> str | None:
         timeout=10,
         check=False,
     )
+    if result.returncode != 0:
+      return None
     project = result.stdout.strip()
     return project if project and "(unset)" not in project else None
-  except (FileNotFoundError, subprocess.TimeoutExpired):
+  except (OSError, subprocess.TimeoutExpired):
     return None
 
 
@@ -682,39 +880,41 @@ def resolve_project_number(project: str) -> str:
   if cached_number:
     return cached_number
 
-  # Resolve via gcloud.  We use ``--format=json`` instead of
-  # ``--format=value(projectNumber)`` because PowerShell on Windows
-  # interprets the parentheses as a sub-expression and breaks the command.
-  try:
-    result = subprocess.run(
-        [
-            gcloud_path(),
-            "projects",
-            "describe",
-            project,
-            "--format=json",
-        ],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        timeout=10,
-        check=False,
-    )
-    if result.returncode == 0 and result.stdout.strip():
-      try:
-        data = json.loads(result.stdout)
-        number = str(data.get("projectNumber", ""))
-      except (json.JSONDecodeError, TypeError, AttributeError):
-        number = ""
-      if number and number.isdigit():
-        # Persist to cache atomically.
-        cache[project] = number
-        save_cache("project_number_map", cache)
-        return number
-  except (FileNotFoundError, subprocess.TimeoutExpired):
-    pass
+  # Resolve via gcloud unless disabled in the environment.  We use
+  # ``--format=json`` instead of ``--format=value(projectNumber)`` because
+  # PowerShell on Windows interprets the parentheses as a sub-expression and
+  # breaks the command.
+  if os.environ.get("ALPHAEVOLVE_NO_GCLOUD") != "1":
+    try:
+      result = subprocess.run(
+          [
+              gcloud_path(),
+              "projects",
+              "describe",
+              project,
+              "--format=json",
+          ],
+          stdout=subprocess.PIPE,
+          stderr=subprocess.PIPE,
+          text=True,
+          encoding="utf-8",
+          errors="replace",
+          timeout=10,
+          check=False,
+      )
+      if result.returncode == 0 and result.stdout.strip():
+        try:
+          data = json.loads(result.stdout)
+          number = str(data.get("projectNumber", ""))
+        except (json.JSONDecodeError, TypeError, AttributeError):
+          number = ""
+        if number and number.isdigit():
+          # Persist to cache atomically.
+          cache[project] = number
+          save_cache("project_number_map", cache)
+          return number
+    except (OSError, subprocess.TimeoutExpired):
+      pass
 
   # Resolution failed — the project ID is non-numeric and gcloud could not
   # resolve it.  Warn so the user (or agent) knows to provide the numeric
@@ -735,6 +935,8 @@ def list_gcloud_projects() -> list[dict[str, str]]:
   Returns:
     A list of dictionary targets including 'projectId' and 'name'.
   """
+  if os.environ.get("ALPHAEVOLVE_NO_GCLOUD") == "1":
+    return []
   try:
     result = subprocess.run(
         [
@@ -755,11 +957,14 @@ def list_gcloud_projects() -> list[dict[str, str]]:
     if result.returncode != 0:
       return []
     projects = json.loads(result.stdout)
+    if not isinstance(projects, list):
+      return []
     return [
         {"projectId": p.get("projectId", ""), "name": p.get("name", "")}
         for p in projects
+        if isinstance(p, dict)
     ]
-  except (FileNotFoundError, subprocess.TimeoutExpired, json.JSONDecodeError):
+  except (OSError, subprocess.TimeoutExpired, json.JSONDecodeError):
     return []
 
 
