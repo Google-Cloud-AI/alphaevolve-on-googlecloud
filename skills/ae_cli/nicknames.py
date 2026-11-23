@@ -33,14 +33,162 @@ import hashlib
 import random
 import typing
 
-import coolname
-import filelock
+try:
+  import fcntl  # pylint: disable=g-import-not-at-top
+except ImportError:
+  fcntl = None  # type: ignore[assignment]
 
-from . import config
+try:
+  import coolname  # pylint: disable=g-import-not-at-top
+except ImportError:
+  coolname = None  # type: ignore[assignment]
+
+try:
+  import filelock  # pylint: disable=g-import-not-at-top
+except ImportError:
+  filelock = None  # type: ignore[assignment]
+
+from . import config  # pylint: disable=g-import-not-at-top
 
 # Prefixes for resource types.
 _EXPERIMENT_PREFIX = "exp-"
 _PROGRAM_PREFIX = "prog-"
+
+# Compact fallback word lists used when the optional `coolname` package is not
+# installed (64 x 64 = 4,096 deterministic two-word slugs).
+_FALLBACK_ADJECTIVES: tuple[str, ...] = (
+    "agile",
+    "amber",
+    "azure",
+    "bold",
+    "brave",
+    "bright",
+    "brisk",
+    "calm",
+    "cedar",
+    "clear",
+    "clever",
+    "cobalt",
+    "cool",
+    "coral",
+    "crisp",
+    "daring",
+    "eager",
+    "early",
+    "emerald",
+    "fair",
+    "fast",
+    "firm",
+    "fleet",
+    "fresh",
+    "gentle",
+    "glad",
+    "golden",
+    "grand",
+    "green",
+    "happy",
+    "hardy",
+    "indigo",
+    "ivory",
+    "jade",
+    "jolly",
+    "keen",
+    "kind",
+    "lively",
+    "lucid",
+    "lucky",
+    "maple",
+    "mellow",
+    "merry",
+    "mint",
+    "misty",
+    "nimble",
+    "noble",
+    "olive",
+    "pearl",
+    "plucky",
+    "proud",
+    "quick",
+    "quiet",
+    "rapid",
+    "rosy",
+    "ruby",
+    "sage",
+    "sharp",
+    "silver",
+    "smart",
+    "solar",
+    "steady",
+    "sunny",
+    "swift",
+)
+
+_FALLBACK_NOUNS: tuple[str, ...] = (
+    "acorn",
+    "alder",
+    "alpaca",
+    "badger",
+    "beaver",
+    "birch",
+    "bison",
+    "brook",
+    "canyon",
+    "cedar",
+    "cliff",
+    "clover",
+    "comet",
+    "condor",
+    "crane",
+    "creek",
+    "dolphin",
+    "eagle",
+    "elk",
+    "falcon",
+    "fern",
+    "finch",
+    "fjord",
+    "fox",
+    "gazelle",
+    "gecko",
+    "glacier",
+    "grove",
+    "harbor",
+    "hawk",
+    "heron",
+    "ibis",
+    "island",
+    "jaguar",
+    "jay",
+    "kestrel",
+    "koala",
+    "lagoon",
+    "lark",
+    "lemur",
+    "linden",
+    "lynx",
+    "marmot",
+    "meadow",
+    "mesa",
+    "mink",
+    "moose",
+    "newt",
+    "osprey",
+    "otter",
+    "owl",
+    "panda",
+    "pelican",
+    "pine",
+    "plover",
+    "puffin",
+    "quail",
+    "raven",
+    "ridge",
+    "robin",
+    "salmon",
+    "seal",
+    "sparrow",
+    "wren",
+)
 
 
 def _detect_resource_type(resource_name: str) -> str:
@@ -71,10 +219,13 @@ def _generate_slug(resource_name: str) -> str:
   digest = hashlib.sha256(resource_name.encode()).digest()
   seed = int.from_bytes(digest[:8], "big")
   rng = random.Random(seed)
-  coolname.replace_random(rng)
-  slug = coolname.generate_slug(2)
-  coolname.replace_random(random.Random())
-  return slug
+  if coolname is not None:
+    coolname.replace_random(rng)
+    try:
+      return coolname.generate_slug(2)
+    finally:
+      coolname.replace_random(random.Random())
+  return f"{rng.choice(_FALLBACK_ADJECTIVES)}-{rng.choice(_FALLBACK_NOUNS)}"
 
 
 def generate_nickname(resource_name: str) -> str:
@@ -165,17 +316,34 @@ class NicknameIndex:
     digest = hashlib.sha256(resource_name.encode()).digest()
     seed = int.from_bytes(digest[:8], "big")
     rng = random.Random(seed)
-    coolname.replace_random(rng)
-
-    slug = coolname.generate_slug(2)
-    nick = f"{prefix}{slug}"
-    while nick in self._nick_to_name:
-      # Collision found! Generate next slug in sequence.
-      slug = coolname.generate_slug(2)
-      nick = f"{prefix}{slug}"
-
-    # Restore default randomness.
-    coolname.replace_random(random.Random())
+    if coolname is not None:
+      coolname.replace_random(rng)
+      try:
+        slug = coolname.generate_slug(2)
+        nick = f"{prefix}{slug}"
+        while nick in self._nick_to_name:
+          # Collision found! Generate next slug in sequence.
+          slug = coolname.generate_slug(2)
+          nick = f"{prefix}{slug}"
+      finally:
+        # Restore default randomness.
+        coolname.replace_random(random.Random())
+    else:
+      base_slug = (
+          f"{rng.choice(_FALLBACK_ADJECTIVES)}-{rng.choice(_FALLBACK_NOUNS)}"
+      )
+      nick = f"{prefix}{base_slug}"
+      attempts = 0
+      while nick in self._nick_to_name:
+        attempts += 1
+        if attempts <= 64:
+          slug = (
+              f"{rng.choice(_FALLBACK_ADJECTIVES)}"
+              f"-{rng.choice(_FALLBACK_NOUNS)}"
+          )
+          nick = f"{prefix}{slug}"
+        else:
+          nick = f"{prefix}{base_slug}-{attempts - 63}"
 
     self._name_to_nick[resource_name] = nick
     self._nick_to_name[nick] = resource_name
@@ -223,8 +391,20 @@ class NicknameIndex:
     del cls  # Unused.
 
     lock_path = config.CACHE_DIR / "nicknames_index.lock"
-    with filelock.FileLock(str(lock_path)):
-      yield
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    if filelock is not None:
+      with filelock.FileLock(str(lock_path)):
+        yield
+      return
+    if fcntl is not None:
+      with open(lock_path, "a+", encoding="utf-8") as lock_file:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+        try:
+          yield
+        finally:
+          fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+      return
+    yield
 
   def save(self) -> None:
     """Saves the index details into persistent disk cache pass throughs."""

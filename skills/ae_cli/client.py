@@ -12,14 +12,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""REST client for the AlphaEvolve Discovery Engine API.
+"""REST and MCP client for the AlphaEvolve Discovery Engine API.
 
-Thin wrapper around requests + google-auth ADC for the
-discoveryengine.googleapis.com/v1alpha HTTP API.
+Supports direct REST access (requests + google-auth ADC) as well as an optional
+injected MCP tool-call transport (`mcp_caller`) for environments that route
+Discovery Engine calls through an MCP endpoint.
 """
 
 from __future__ import annotations
 
+import collections.abc
 from collections.abc import Iterator
 import json
 import os
@@ -30,13 +32,35 @@ import typing
 import uuid
 import warnings
 
-import google.auth
-import google.auth.exceptions
-import google.auth.transport.requests
-import requests
+try:
+  import google.auth  # pylint: disable=g-import-not-at-top
+  import google.auth.exceptions  # pylint: disable=g-import-not-at-top
+  import google.auth.transport.requests  # pylint: disable=g-import-not-at-top
+
+  _HAS_GOOGLE_AUTH = True
+except ImportError:
+  google = None  # type: ignore[assignment]
+  _HAS_GOOGLE_AUTH = False
+
+import requests  # pylint: disable=g-import-not-at-top
 
 from . import config
 from . import version
+
+# Signature for an injected MCP tool caller:
+#   (tool_name, arguments, idempotent, timeout) -> response dict
+# Callers should raise ApiError on API/transport failures.
+McpCaller: typing.TypeAlias = collections.abc.Callable[
+    [str, dict[str, typing.Any], bool, float | None],
+    dict[str, typing.Any],
+]
+
+# Timeout (seconds) passed to mcp_caller for confirmation-gated write tools.
+MCP_CONFIRMATION_TIMEOUT_SECONDS = 2100.0
+
+# Timeout (seconds) passed to mcp_caller for synchronous long-deadline RPCs
+# such as CreateAlphaEvolveProgram (server deadline is 120s for safety checks).
+MCP_LONG_RPC_TIMEOUT_SECONDS = 180.0
 
 
 def detect_origin() -> str:
@@ -116,7 +140,7 @@ def build_base_url(location: str) -> str:
 
 
 class AlphaEvolveClient:
-  """REST client for the AlphaEvolve Discovery Engine API."""
+  """Client for the AlphaEvolve Discovery Engine API (REST or injected MCP)."""
 
   API_VERSION = "v1alpha"
 
@@ -124,15 +148,24 @@ class AlphaEvolveClient:
       self,
       cfg: config.Config,
       verbose: bool = False,
+      mcp_caller: McpCaller | None = None,
   ):
     """Initializes the AlphaEvolveClient.
 
     Args:
       cfg: The Config object containing project, location, etc.
-      verbose: If True, enables debug logging for HTTP requests/responses.
+      verbose: If True, enables debug logging for requests/responses.
+      mcp_caller: Optional callable `(tool_name, arguments, idempotent, timeout)
+        -> response dict` that routes API calls over an MCP transport instead of
+        direct REST + ADC.
+
+    Raises:
+      ValueError: If `cfg.project` is set to a non-numeric project ID.
+      ImportError: If REST ADC is needed and `google-auth` is not installed.
     """
     self._config = cfg
     self._verbose = verbose
+    self._mcp_caller: McpCaller | None = mcp_caller
 
     # The Discovery Engine API requires a numeric project number in resource
     # paths.  A non-numeric project ID (e.g. "my-project") causes cryptic
@@ -147,33 +180,98 @@ class AlphaEvolveClient:
           "--format='value(projectNumber)'"
       )
 
-    self._session = requests.Session()
     self._base_url = cfg.base_url or build_base_url(cfg.location)
     if self._base_url and not self._base_url.startswith(
         ("http://", "https://")
     ):
       self._base_url = f"https://{self._base_url}"
 
-    # Authenticate via injected access token (e.g. inside sandbox VMs without
-    # ambient ADC) or fall back to standard google.auth.default() ADC.
-    self._static_token = os.environ.get("ALPHAEVOLVE_ACCESS_TOKEN")
-    if self._static_token:
-      self._credentials = None
-      self._gcp_project = cfg.project
-      self._auth_request = None
-    else:
-      try:
-        self._credentials, self._gcp_project = google.auth.default(
-            scopes=["https://www.googleapis.com/auth/cloud-platform"],
-        )
-      except google.auth.exceptions.DefaultCredentialsError as e:
-        raise google.auth.exceptions.DefaultCredentialsError(
-            f"{e}\nAlphaEvolve found no credentials. Run `gcloud auth"
-            " application-default login`, or set ALPHAEVOLVE_ACCESS_TOKEN to"
-            " an OAuth2 access token."
-        ) from e
-      self._auth_request = google.auth.transport.requests.Request()
+    self._session: requests.Session | None = None
+    self._static_token: str | None = None
+    self._credentials: typing.Any = None
+    self._gcp_project: str | None = cfg.project
+    self._auth_request: typing.Any = None
+
+    if mcp_caller is None:
+      self._session = requests.Session()
+      # Authenticate via injected access token (e.g. inside sandbox VMs without
+      # ambient ADC) or fall back to standard google.auth.default() ADC.
+      self._static_token = os.environ.get("ALPHAEVOLVE_ACCESS_TOKEN")
+      if not self._static_token:
+        if not _HAS_GOOGLE_AUTH or google is None:
+          raise ImportError(
+              "google-auth is required for Application Default Credentials. "
+              "Install google-auth, set ALPHAEVOLVE_ACCESS_TOKEN, or pass "
+              "mcp_caller."
+          )
+        try:
+          self._credentials, self._gcp_project = google.auth.default(
+              scopes=["https://www.googleapis.com/auth/cloud-platform"],
+          )
+        except google.auth.exceptions.DefaultCredentialsError as e:
+          raise google.auth.exceptions.DefaultCredentialsError(
+              f"{e}\nAlphaEvolve found no credentials. Run `gcloud auth"
+              " application-default login`, or set ALPHAEVOLVE_ACCESS_TOKEN to"
+              " an OAuth2 access token."
+          ) from e
+        self._auth_request = google.auth.transport.requests.Request()
     self._resolved_session = None  # Cache for resolved session ID
+
+  @property
+  def uses_mcp(self) -> bool:
+    """Returns True when this client routes requests via an injected MCP caller."""
+    return self._mcp_caller is not None
+
+  def _call_mcp(
+      self,
+      tool_name: str,
+      arguments: dict[str, typing.Any],
+      *,
+      idempotent: bool,
+      timeout: float | None = None,
+  ) -> dict[str, typing.Any]:
+    """Invokes the injected MCP caller with optional verbose logging."""
+    if self._mcp_caller is None:
+      raise RuntimeError("MCP caller is not configured on this client.")
+    clean_args = {k: v for k, v in arguments.items() if v is not None}
+    if self._verbose:
+      print(f"  → MCP {tool_name}")
+      if clean_args:
+        print(f"    args: {json.dumps(clean_args, indent=2)[:500]}")
+    try:
+      resp = self._mcp_caller(tool_name, clean_args, idempotent, timeout)
+    except ApiError:
+      raise
+    except Exception as e:
+      raise ApiError(
+          503 if idempotent else 408,
+          f"MCP {tool_name} failed: {e}",
+      ) from e
+    if resp is None:
+      return {}
+    if not isinstance(resp, dict):
+      raise ApiError(
+          502,
+          f"Unexpected non-object MCP response from {tool_name}:"
+          f" {type(resp).__name__}",
+      )
+    return resp
+
+  def _list_all_mcp(
+      self,
+      tool_name: str,
+      key: str,
+      arguments: dict[str, typing.Any],
+  ) -> Iterator[dict[str, typing.Any]]:
+    """Auto-paginates through all results for an MCP list tool."""
+    args = {k: v for k, v in arguments.items() if v is not None}
+    while True:
+      resp = self._call_mcp(tool_name, args, idempotent=True)
+      yield from resp.get(key, [])
+      token = resp.get("nextPageToken")
+      if not token:
+        break
+      args["pageToken"] = token
 
   # -----------------------------------------------------------------
   # URL construction
@@ -198,13 +296,18 @@ class AlphaEvolveClient:
   def _resolve_session_id(self) -> str:
     """Resolves template-style Session ID or creates a new one.
 
-    If the session is set to '[create new]', it triggers CreateSession to
-    provision a fresh numerical session ID from the server.
+    In MCP mode, placeholders resolve to the server-managed wildcard ``"-"``
+    without calling ``create_session``. In REST mode, ``"[create new]"``
+    provisions a fresh session ID from the server.
 
     Returns:
       The resolved Session ID string.
     """
     val = self._config.session
+    if self._mcp_caller is not None:
+      if not val or val in ("[create new]", "-"):
+        return "-"
+      return val
     if val == "[create new]":
       if not self._resolved_session:
         try:
@@ -223,8 +326,14 @@ class AlphaEvolveClient:
       The extracted Session ID string from response.
 
     Raises:
-      ApiError: If the CreateSession call fails.
+      ApiError: If the CreateSession call fails or is called in MCP mode.
     """
+    if self._mcp_caller is not None:
+      raise ApiError(
+          501,
+          "create_session is not supported in MCP mode; pass session '-'"
+          " instead.",
+      )
     parent = (
         f"projects/{self._config.project}"
         f"/locations/{self._config.location}"
@@ -235,7 +344,10 @@ class AlphaEvolveClient:
       print("Provisioning a new session ID from the server...")
 
     params: dict[str, typing.Any] = {}
-    body: dict[str, typing.Any] = {"display_name": "AlphaEvolve Session"}
+    body: dict[str, typing.Any] = {
+        "display_name": "AlphaEvolve Session",
+        "labels": ["alpha-evolve"],
+    }
     user_pseudo_id = self._config.user_pseudo_id
     if user_pseudo_id:
       body["user_pseudo_id"] = user_pseudo_id
@@ -275,9 +387,26 @@ class AlphaEvolveClient:
       page_size: Max number of items to return per page request.
       **extra_params: Optional parameters to pass into query URL.
 
-    Yields:
-      Dict objects representing Session details.
+    Returns:
+      An iterator yielding dicts representing Session details.
+
+    Raises:
+      ApiError: If called in MCP mode (status 501) or if the API request fails.
     """
+    if self._mcp_caller is not None:
+      raise ApiError(
+          501,
+          "list_sessions is not supported in MCP mode; use"
+          " list_experiments(session_id='-') instead.",
+      )
+    return self._iter_sessions(page_size=page_size, **extra_params)
+
+  def _iter_sessions(
+      self,
+      page_size: int = 100,
+      **extra_params: typing.Any,
+  ) -> Iterator[dict[str, typing.Any]]:
+    """Iterates sessions for the configured engine over REST."""
     # Remove '/sessions/...' part from parent to get engine parent
     path = (
         f"projects/{self._config.project}"
@@ -318,12 +447,18 @@ class AlphaEvolveClient:
       **extra_params: typing.Any,
   ) -> Iterator[dict[str, typing.Any]]:
     """Lists Engines for the configured project/location/collection."""
-    path = (
+    parent = (
         f"projects/{self._config.project}"
         f"/locations/{self._config.location}"
         f"/collections/{self._config.collection}"
-        "/engines"
     )
+    if self._mcp_caller is not None:
+      return self._list_all_mcp(
+          "list_engines",
+          "engines",
+          {"parent": parent, "pageSize": page_size, **extra_params},
+      )
+    path = f"{parent}/engines"
     return self._list_all(
         path,
         "engines",
@@ -404,6 +539,7 @@ class AlphaEvolveClient:
       ApiError: If the response status code is 400 or above, or the request
         failed at the transport level: 503 once retries are exhausted, 408 when
         a non-idempotent request may have reached the server.
+      RuntimeError: If invoked while MCP transport is active (no HTTP session).
     """
     url = self._url(path)
     if idempotent is None:
@@ -414,6 +550,10 @@ class AlphaEvolveClient:
       if json_body:
         print(f"    body: {json.dumps(json_body, indent=2)[:500]}")
 
+    if self._session is None:
+      raise RuntimeError(
+          "REST HTTP session is unavailable when MCP transport is active."
+      )
     start = time.monotonic()
     attempt = 0
     while True:
@@ -578,6 +718,12 @@ class AlphaEvolveClient:
     Returns:
       A dictionary representation of the Operation resource.
     """
+    if self._mcp_caller is not None:
+      return self._call_mcp(
+          "get_operation",
+          {"name": operation_name},
+          idempotent=True,
+      )
     return self._get(operation_name)
 
   def poll_operation(
@@ -587,6 +733,10 @@ class AlphaEvolveClient:
       timeout: float = 3600.0,
   ) -> dict[str, typing.Any]:
     """Polls a long-running operation until done or timeout.
+
+    Note: ``start_experiment`` and ``resume_experiment`` return synthetic
+    already-done operations; callers should check experiment progress via
+    ``get_experiment``.
 
     Args:
       operation_name: The full resource name of the operation.
@@ -601,7 +751,7 @@ class AlphaEvolveClient:
     """
     start = time.time()
     while time.time() - start < timeout:
-      result = self._get(operation_name)
+      result = self.get_operation(operation_name)
       if result.get("done"):
         if "error" in result:
           err = result["error"]
@@ -631,6 +781,13 @@ class AlphaEvolveClient:
     Returns:
       The created Experiment resource representation.
     """
+    if self._mcp_caller is not None:
+      return self._call_mcp(
+          "create_alpha_evolve_experiment",
+          {"parent": self._parent, "alphaEvolveExperiment": body},
+          idempotent=False,
+          timeout=MCP_CONFIRMATION_TIMEOUT_SECONDS,
+      )
     path = f"{self._parent}/alphaEvolveExperiments"
     return self._post(path, body)
 
@@ -643,6 +800,12 @@ class AlphaEvolveClient:
     Returns:
       The Experiment resource representation.
     """
+    if self._mcp_caller is not None:
+      return self._call_mcp(
+          "get_alpha_evolve_experiment",
+          {"name": experiment_name},
+          idempotent=True,
+      )
     return self._get(experiment_name)
 
   def list_experiments(
@@ -671,6 +834,12 @@ class AlphaEvolveClient:
       )
     else:
       parent = self._parent
+    if self._mcp_caller is not None:
+      return self._list_all_mcp(
+          "list_alpha_evolve_experiments",
+          "alphaEvolveExperiments",
+          {"parent": parent, "pageSize": page_size, **extra_params},
+      )
     path = f"{parent}/alphaEvolveExperiments"
     return self._list_all(
         path,
@@ -694,6 +863,13 @@ class AlphaEvolveClient:
     Returns:
       The Long Running Operation (LRO) state representation.
     """
+    if self._mcp_caller is not None:
+      return self._call_mcp(
+          "start_alpha_evolve_experiment",
+          {"name": experiment_name},
+          idempotent=False,
+          timeout=MCP_CONFIRMATION_TIMEOUT_SECONDS,
+      )
     return self._post(f"{experiment_name}:start", {"name": experiment_name})
 
   def resume_experiment(self, experiment_name: str) -> dict[str, typing.Any]:
@@ -705,6 +881,13 @@ class AlphaEvolveClient:
     Returns:
       The Long Running Operation (LRO) state representation.
     """
+    if self._mcp_caller is not None:
+      return self._call_mcp(
+          "resume_alpha_evolve_experiment",
+          {"name": experiment_name},
+          idempotent=False,
+          timeout=MCP_CONFIRMATION_TIMEOUT_SECONDS,
+      )
     return self._post(f"{experiment_name}:resume", {"name": experiment_name})
 
   def delete_experiment(self, experiment_name: str) -> dict[str, typing.Any]:
@@ -715,7 +898,15 @@ class AlphaEvolveClient:
 
     Returns:
       The deletion response dictionary.
+
+    Raises:
+      ApiError: If called in MCP mode (status 501) or if the API request fails.
     """
+    if self._mcp_caller is not None:
+      raise ApiError(
+          501,
+          "delete_experiment is not supported in MCP mode.",
+      )
     return self._delete(experiment_name)
 
   # -----------------------------------------------------------------
@@ -736,6 +927,13 @@ class AlphaEvolveClient:
     Returns:
       The created Program dictionary state.
     """
+    if self._mcp_caller is not None:
+      return self._call_mcp(
+          "create_alpha_evolve_program",
+          {"parent": experiment_name, "alphaEvolveProgram": body},
+          idempotent=False,
+          timeout=MCP_LONG_RPC_TIMEOUT_SECONDS,
+      )
     path = f"{experiment_name}/alphaEvolvePrograms"
     return self._post(path, body)
 
@@ -754,6 +952,12 @@ class AlphaEvolveClient:
     """
 
 
+    if self._mcp_caller is not None:
+      return self._call_mcp(
+          "get_alpha_evolve_program",
+          {"name": program_name},
+          idempotent=True,
+      )
     return self._get(program_name)
 
   def list_programs(
@@ -774,12 +978,18 @@ class AlphaEvolveClient:
     Returns:
       An iterator yielding Program dictionaries.
     """
-    path = f"{experiment_name}/alphaEvolvePrograms"
     params: dict[str, typing.Any] = {"pageSize": page_size}
     if order_by:
       params["orderBy"] = order_by
     if state_filter:
-      params["filter"] = f'state="{state_filter}"'
+      params["stateFilter"] = state_filter
+    if self._mcp_caller is not None:
+      return self._list_all_mcp(
+          "list_alpha_evolve_programs",
+          "alphaEvolvePrograms",
+          {"parent": experiment_name, **params},
+      )
+    path = f"{experiment_name}/alphaEvolvePrograms"
     return self._list_all(path, "alphaEvolvePrograms", **params)
 
   def acquire_programs(
@@ -796,15 +1006,22 @@ class AlphaEvolveClient:
     Returns:
       The acquisition response dictionary.
     """
+    payload = {
+        "parent": experiment_name,
+        "desiredProgramsCount": desired_count,
+    }
+    if self._mcp_caller is not None:
+      return self._call_mcp(
+          "acquire_alpha_evolve_programs",
+          payload,
+          idempotent=True,
+      )
     path = f"{experiment_name}:acquirePrograms"
     # The controller re-acquires after any error anyway, so a retry whose first
     # response was lost strands at most the programs that attempt locked.
     return self._post(
         path,
-        {
-            "parent": experiment_name,
-            "desiredProgramsCount": desired_count,
-        },
+        payload,
         idempotent=True,
     )
 
@@ -831,14 +1048,22 @@ class AlphaEvolveClient:
     """
     path = f"{experiment_name}:submitProgramsEvaluations"
     for submission in submissions:
-      resp = self._post(
-          path,
-          {
-              "parent": experiment_name,
-              "evaluationSubmissions": [submission],
-          },
-          idempotent=True,
-      )
+      payload = {
+          "parent": experiment_name,
+          "evaluationSubmissions": [submission],
+      }
+      if self._mcp_caller is not None:
+        resp = self._call_mcp(
+            "submit_alpha_evolve_evaluations",
+            payload,
+            idempotent=True,
+        )
+      else:
+        resp = self._post(
+            path,
+            payload,
+            idempotent=True,
+        )
       if resp:
         warnings.warn(
             "Expected submitProgramsEvaluations to return an empty response; "

@@ -169,6 +169,123 @@ def _parse_score_output(output_path: pathlib.Path) -> ParsedScoreOutput:
   )
 
 
+def validate_score(value: Any, metric: str = "score") -> float:
+  """Validates and converts a metric value to a finite float."""
+  if isinstance(value, bool) or not isinstance(value, (int, float)):
+    raise EvaluationError(f"Metric '{metric}' has non-numeric score: {value!r}")
+  score = float(value)
+  if math.isnan(score) or math.isinf(score):
+    raise EvaluationError(f"Metric '{metric}' has non-finite score: {value!r}")
+  return score
+
+
+def parse_metrics_file(metrics_path: pathlib.Path) -> dict[str, Any]:
+  """Parses a JSON metrics file into an API evaluation payload dict.
+
+  Supported JSON shapes:
+    1. ``{"scores": [{"metric": "score", "score": 0.9}, ...], "insights"?:
+    [...]}``
+    2. ``{"metrics": {"score": 0.9, "speed": 1.2}, "insights"?: [...]}``
+    3. ``{"score": 0.9, "secondary": 1.2, "insights"?: [...]}``
+
+  Args:
+    metrics_path: Path to the JSON metrics file.
+
+  Returns:
+    An ``AlphaEvolveProgramEvaluation`` dictionary with ``scores`` (and
+    optional ``insights``) ready for submission.
+
+  Raises:
+    EvaluationError: If the file is missing, invalid JSON, or has no valid
+      scores.
+  """
+  if not metrics_path.exists():
+    raise EvaluationError(f"Metrics file not found: {metrics_path}")
+  try:
+    with open(metrics_path, encoding="utf-8") as f:
+      data = json.load(f)
+  except (json.JSONDecodeError, OSError) as e:
+    raise EvaluationError(f"Failed to parse metrics file: {e}") from e
+
+  if not isinstance(data, dict):
+    raise EvaluationError("Metrics file must contain a JSON object.")
+
+  raw_insights = data.get("insights", [])
+  if not isinstance(raw_insights, list):
+    raise EvaluationError("'insights' in metrics file must be a list.")
+  insights: list[dict[str, str]] = []
+  for item in raw_insights:
+    if not isinstance(item, dict) or "label" not in item or "text" not in item:
+      raise EvaluationError(
+          f"Each insight must have 'label' and 'text' keys: {item!r}"
+      )
+    insights.append({"label": str(item["label"]), "text": str(item["text"])})
+
+  scores_list: list[dict[str, Any]] = []
+  if "scores" in data:
+    raw_scores = data["scores"]
+    if not isinstance(raw_scores, list) or not raw_scores:
+      raise EvaluationError(
+          "'scores' in metrics file must be a non-empty list."
+      )
+    for entry in raw_scores:
+      if (
+          not isinstance(entry, dict)
+          or "metric" not in entry
+          or "score" not in entry
+      ):
+        raise EvaluationError(
+            f"Each score entry must have 'metric' and 'score' keys: {entry!r}"
+        )
+      metric = str(entry["metric"])
+      val = (
+          FAILURE_SCORE
+          if entry["score"] is None
+          else validate_score(entry["score"], metric)
+      )
+      scores_list.append({"metric": metric, "score": val})
+  elif "metrics" in data:
+    raw_metrics = data["metrics"]
+    if not isinstance(raw_metrics, dict) or not raw_metrics:
+      raise EvaluationError(
+          "'metrics' in metrics file must be a non-empty object."
+      )
+    # Place primary "score" first when present.
+    ordered_keys = (
+        ["score"] + [k for k in raw_metrics if k != "score"]
+        if "score" in raw_metrics
+        else list(raw_metrics.keys())
+    )
+    for k in ordered_keys:
+      raw_val = raw_metrics[k]
+      val = (
+          FAILURE_SCORE if raw_val is None else validate_score(raw_val, str(k))
+      )
+      scores_list.append({"metric": str(k), "score": val})
+  elif "score" in data:
+    raw_primary = data["score"]
+    primary_val = (
+        FAILURE_SCORE
+        if raw_primary is None
+        else validate_score(raw_primary, "score")
+    )
+    scores_list.append({"metric": "score", "score": primary_val})
+    for k, v in data.items():
+      if k in ("score", "insights"):
+        continue
+      val = FAILURE_SCORE if v is None else validate_score(v, str(k))
+      scores_list.append({"metric": str(k), "score": val})
+  else:
+    raise EvaluationError(
+        "Metrics file must contain 'scores', 'metrics', or 'score'."
+    )
+
+  evaluation: dict[str, Any] = {"scores": {"scores": scores_list}}
+  if insights:
+    evaluation["insights"] = {"insights": insights}
+  return evaluation
+
+
 def prepare_workspace(
     program_files: list[dict[str, str]],
     evaluator_path: pathlib.Path,
