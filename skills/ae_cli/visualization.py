@@ -23,12 +23,12 @@ from __future__ import annotations
 import collections.abc
 import datetime
 import html as html_module
+import importlib
 import json
 import pathlib
 import re
 from typing import Any
 
-import markdown as markdown_lib
 import matplotlib
 
 matplotlib.use("Agg")
@@ -46,21 +46,41 @@ NicknameFn = collections.abc.Callable[[str], str] | None
 
 def _render_markdown(text: str) -> str:
   """Converts markdown text to HTML with syntax-highlighted code blocks."""
-  md = markdown_lib.Markdown(
-      extensions=[
-          "fenced_code",
-          "tables",
-          "codehilite",
-      ],
-      extension_configs={
-          "codehilite": {
-              "css_class": "codehilite",
-              "guess_lang": True,
-              "noclasses": False,
-          },
-      },
-  )
-  return md.convert(text)
+  try:
+    import markdown as markdown_lib  # pylint: disable=g-import-not-at-top
+  except ImportError:
+    markdown_lib = None
+
+  if markdown_lib is not None:
+    md = markdown_lib.Markdown(
+        extensions=[
+            "fenced_code",
+            "tables",
+            "codehilite",
+        ],
+        extension_configs={
+            "codehilite": {
+                "css_class": "codehilite",
+                "guess_lang": True,
+                "noclasses": False,
+            },
+        },
+    )
+    return md.convert(text)
+
+  try:
+    markdown_it = importlib.import_module("markdown_it")
+  except ImportError:
+    markdown_it = None
+
+  if markdown_it is not None:
+    return (
+        markdown_it.MarkdownIt("commonmark", {"html": False})
+        .enable("table")
+        .render(text)
+    )
+
+  return f"<pre>{html_module.escape(text)}</pre>"
 
 
 def _highlight_python(code: str) -> str:

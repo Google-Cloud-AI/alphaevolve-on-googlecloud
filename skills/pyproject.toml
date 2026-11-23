@@ -17,7 +17,6 @@ dependencies = [
     "google-auth>=2.0",
     "coolname>=2.0",
     "filelock>=3.0",
-    "immutabledict>=2.0",
     "Markdown>=3.4",
     "matplotlib>=3.5",
     "Pygments>=2.14",
