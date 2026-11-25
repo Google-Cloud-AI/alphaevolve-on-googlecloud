@@ -62,12 +62,23 @@ MCP_CONFIRMATION_TIMEOUT_SECONDS = 2100.0
 # such as CreateAlphaEvolveProgram (server deadline is 120s for safety checks).
 MCP_LONG_RPC_TIMEOUT_SECONDS = 180.0
 
+_ALLOWED_ORIGINS = frozenset({
+    "antigravity_enterprise",
+    "antigravity",
+    "science_workbench",
+    "gemini_enterprise",
+    "labs",
+    "cli",
+})
+
 
 def detect_origin() -> str:
-  """Returns where this CLI process was started from.
-
-  Antigravity sets ANTIGRAVITY_AGENT=1 on every shell command it runs.
-  """
+  """Returns where this CLI process was started from."""
+  explicit = os.environ.get("ALPHAEVOLVE_ORIGIN", "").strip().lower()
+  if explicit in _ALLOWED_ORIGINS:
+    return explicit
+  if os.environ.get("ANTIGRAVITY_ENTERPRISE") == "1":
+    return "antigravity_enterprise"
   if os.environ.get("ANTIGRAVITY_AGENT") == "1":
     return "antigravity"
   return "cli"
