@@ -44,9 +44,11 @@ BASE_URL = os.getenv("BASE_URL", "discoveryengine.googleapis.com")
 
 
 # Run settings
-MAX_PROGRAMS_GENERATED = 10
-CONCURRENCY = 2
-MAX_PROGRAMS_EVALUATED = 10
+# Overridable from the environment, matching the other example runners; the previous
+# hardcoded values remain the defaults.
+MAX_PROGRAMS_GENERATED = int(os.getenv("MAX_PROGRAMS_GENERATED", "10"))
+CONCURRENCY = int(os.getenv("CONCURRENCY", "2"))
+MAX_PROGRAMS_EVALUATED = int(os.getenv("MAX_PROGRAMS_EVALUATED", "10"))
 
 THIS_FILE_DIR = Path(os.path.dirname(os.path.realpath(__file__)))
 
